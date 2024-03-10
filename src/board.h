@@ -1,0 +1,134 @@
+#ifndef BOARD_H_INCLUDED
+#define BOARD_H_INCLUDED
+
+#include <string>
+
+#include "bitboard.h"
+#include "chess.h"
+
+#define START_FEN "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+using BoardHash = uint64_t;
+
+void precompute_zobrist();
+
+class BoardMemory
+{
+  public:
+    BoardMemory() {}
+
+  private:
+    friend class Board;
+
+    void operator>>(BoardMemory& to);
+
+    Piece captured;
+    Move move;
+
+    CastlingRights castling_rights;
+    EPRights ep_rights;
+    uint32_t fifty_move_counter;
+    BoardHash hash;
+
+    // These variables are with respect to the current side to move
+    Bitboard pinned;
+    Bitboard checkers;
+
+    BoardMemory* previous;
+};
+
+class Board
+{
+  public:
+    Board();
+    Board(const Board&) = delete;
+    Board& operator=(const Board&) = delete;
+
+    constexpr Piece at(Square sq) const { return board[sq]; }
+    constexpr Colour side() const { return side_to_move; }
+    constexpr uint32_t fifty_move_counter() const { return head->fifty_move_counter; }
+    constexpr uint32_t current_fullmove() const { return fullmove_counter; }
+    constexpr BoardHash hash() const { return head->hash; }
+    BoardHash make_full_hash() const;
+
+    constexpr CastlingRights castling_rights() const { return head->castling_rights; }
+    constexpr EPRights ep_rights() const { return head->ep_rights; }
+    constexpr bool has_castling_right(CastlingRights cr) const { return head->castling_rights & cr; }
+
+    void make_move(Move move, BoardMemory& memory);
+    void unmake_move();
+
+    void make_null_move(BoardMemory& memory);
+    void unmake_null_move();
+
+    inline Bitboard occ() const { return occupancy; }
+    inline Bitboard occ(Colour c) const { return colour_occupancy[c]; }
+    inline Bitboard occ(Piece p) const { return piece_occupancy[p]; }
+
+    constexpr Bitboard pinned() const { return head->pinned; }
+    constexpr Bitboard checkers() const { return head->checkers; }
+
+    inline bool is_loud(Move move) const;
+    constexpr bool previous_was_null_move() const { return head->move.is_null(); }
+    bool is_valid() const;
+
+    template<Colour Side>
+    constexpr Bitboard threats_to(Square sq, Bitboard occup) const;
+    template<bool IncludeKingThreats>
+    inline Bitboard threats_to(Colour side, Square sq, Bitboard occup) const;
+
+    std::string fen() const;
+    void set_fen(const std::string& fen);
+    std::string as_image_str() const;
+
+  private:
+    void clear();
+    inline Piece& at(Square sq) { return board[sq]; }
+    Piece move_piece(Square from, Square to);
+    void unmove_piece(Square from, Square to, Piece captured);
+
+    void place_piece(Square sq, Piece piece);
+    Piece remove_piece(Square sq);
+
+    void recalculate_transients() const;
+
+    Piece board[SQ_MAX];
+
+    Colour side_to_move;
+    uint32_t fullmove_counter;
+
+    Bitboard occupancy;
+    Bitboard colour_occupancy[COLOUR_MAX];
+    Bitboard piece_occupancy[MAX_PIECE];
+
+    CastlingRights relevant_castle[SQ_MAX];
+
+    BoardMemory root, *head;
+};
+
+inline bool Board::is_loud(Move move) const
+{
+    return move.is_promotion() || move.is_ep() || (is_piece(at(move.to_sq())) && !move.is_castle());
+}
+
+template<Colour Side>
+constexpr Bitboard Board::threats_to(Square sq, Bitboard occup) const
+{
+    return (piece_moves<ROOK>(sq, occup) & (occ(ROOK * ~Side) | occ(QUEEN * ~Side))) |
+           (piece_moves<BISHOP>(sq, occup) & (occ(BISHOP * ~Side) | occ(QUEEN * ~Side))) |
+           (piece_moves<KNIGHT>(sq, occup) & occ(KNIGHT * ~Side)) |
+           (pawn_capture_mask_sq<Side>(sq) & occ(PAWN * ~Side)) |
+           (piece_moves<KING>(sq, occup) & occ(KING * ~Side));
+}
+
+template<bool IncludeKingThreats>
+inline Bitboard Board::threats_to(Colour side, Square sq, Bitboard occup) const
+{
+    return (piece_moves<ROOK>(sq, occup) & (occ(ROOK * ~side) | occ(QUEEN * ~side))) |
+           (piece_moves<BISHOP>(sq, occup) & (occ(BISHOP * ~side) | occ(QUEEN * ~side))) |
+           (piece_moves<KNIGHT>(sq, occup) & occ(KNIGHT * ~side)) |
+           (pawn_capture_mask_sq(side, sq) & occ(PAWN * ~side)) |
+           (IncludeKingThreats ? piece_moves<KING>(sq, occup) & occ(KING * ~side) : BB_EMPTY);
+}
+
+#endif
