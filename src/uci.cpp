@@ -1,6 +1,5 @@
 #include "uci.h"
 
-#include <cmath>
 #include <iostream>
 
 #include "perft.h"
@@ -63,7 +62,7 @@ void UCI::start()
                     << "Please refer to it for further information. Nonstandard commands\n"
                     << "include:\n\n"
                     << "    perft <depth>\n"
-                    << "    test <test-file> <secs-per-test>\n"
+                    << "    test <test-file> <ms-per-test>\n"
                     << std::endl;
 
             } else if (token == "quit" || token == "exit") {
@@ -127,52 +126,39 @@ void UCI::go(std::istringstream& in)
 {
     assert(!searcher.is_searching());
 
-    constexpr float inf = std::numeric_limits<float>().infinity();
-
-    int search_depth = MAX_DEPTH;
-    float search_time = inf;
-
-    bool is_ponder = false;
-    float wtime = 0.0f, btime = 0.0f, winc = 0.0f, binc = 0.0f;
-    int moves_to_go = 0;
+    SearchConditions conditions;
 
     std::string token;
     while (in >> token) {
 
         if (token == "depth" || token == "mate") {
-            in >> search_depth;
+            in >> conditions.depth;
 
-            if (search_depth >= MAX_DEPTH)
-                search_depth = MAX_DEPTH;
+            if (conditions.depth >= MAX_DEPTH)
+                conditions.depth = MAX_DEPTH;
 
         } else if (token == "infinite") {
-            search_depth = MAX_DEPTH;
 
         } else if (token == "ponder") {
-            is_ponder = true;
+            conditions.ponder = true;
 
         } else if (token == "movetime") {
-            in >> search_time;
-            search_time /= 1000.0f;
+            in >> conditions.move_time;
 
         } else if (token == "movestogo") {
-            in >> moves_to_go;
+            in >> conditions.moves_to_go;
 
         } else if (token == "wtime") {
-            in >> wtime;
-            wtime /= 1000.0f;
+            in >> conditions.wtime;
 
         } else if (token == "btime") {
-            in >> btime;
-            btime /= 1000.0f;
+            in >> conditions.btime;
 
         } else if (token == "winc") {
-            in >> winc;
-            winc /= 1000.0f;
+            in >> conditions.winc;
 
         } else if (token == "binc") {
-            in >> binc;
-            binc /= 1000.0f;
+            in >> conditions.binc;
 
         } else {
             log_sync("Unknown arguments.\n");
@@ -180,18 +166,7 @@ void UCI::go(std::istringstream& in)
         }
     }
 
-    if (board.side() == BLACK) {
-        std::swap(wtime, btime);
-        std::swap(winc, binc);
-    }
-
-    if (wtime > 0.0f) {
-        search_time = std::min(search_time, TimeStrategy::one_twentieth(wtime, btime, winc, binc, moves_to_go));
-    }
-
-    assert(search_time > 0.0f);
-
-    searcher.go(search_receiver, board, search_depth, search_time, is_ponder);
+    searcher.go(search_receiver, board, conditions);
 }
 
 void UCI::start_perft(std::istringstream& in)
@@ -214,7 +189,7 @@ void UCI::start_perft(std::istringstream& in)
 void UCI::start_test(std::istringstream& in)
 {
     std::string token;
-    float search_time;
+    uint64_t search_time = 0;
     in >> token >> search_time;
 
     TestSuite suite = TestSuite::from_file(token);
@@ -227,7 +202,7 @@ void UCISearchReceiver::receive_search_result(const SearchResult& result)
 {
     std::ostringstream out;
 
-    if (result.type() == FINAL_BEST) {
+    if (result.type() == BEST_RESULT) {
 
         out << "bestmove " << result.pv().first().uci_notation();
 
@@ -236,12 +211,24 @@ void UCISearchReceiver::receive_search_result(const SearchResult& result)
 
         out << std::endl;
 
-    } else if (result.type() == CURRENT_BEST) {
+    } else if (result.type() == INFO_RESULT) {
 
         out << "info currmove " << result.pv().first().uci_notation()
-            << " depth " << result.pv().len()
-            << " score cp " << result.evaluation()
-            << " pv " << result.pv().to_string()
+            << " depth " << result.depth()
+            << " seldepth " << result.pv().len();
+
+        if (is_mate(result.evaluation()))
+            out << " score mate " << sign(result.evaluation()) * (result.pv().len() + 1) / 2;
+        else
+            out << " score cp " << result.evaluation();
+
+        out << " nodes " << result.nodes()
+            << " time " << result.time_in_ms();
+
+        if (result.time_in_ms() != 0)
+            out << " nps " << ((result.nodes() * 1000) / result.time_in_ms());
+
+        out << " pv " << result.pv().to_string()
             << std::endl;
 
     } else {

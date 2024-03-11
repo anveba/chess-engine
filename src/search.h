@@ -2,14 +2,15 @@
 #define SEARCH_H_INCLUDED
 
 #include <atomic>
-#include <chrono>
 #include <thread>
 
 #include "board.h"
 #include "eval.h"
+#include "timestrat.h"
 
 constexpr size_t MAX_WORKERS = 256;
 constexpr int MAX_DEPTH = 255;
+constexpr int MAX_PV_LENGTH = MAX_DEPTH + 32;
 
 enum SearchNode
 {
@@ -17,13 +18,27 @@ enum SearchNode
     NON_PV_NODE
 };
 
-enum SearchResultType
+struct SearchConditions
 {
-    FINAL_BEST,
-    CURRENT_BEST
+    SearchConditions()
+    {
+        ponder = false;
+        wtime = btime = winc = binc = 0;
+        moves_to_go = 0;
+        move_time = 0;
+        depth = MAX_DEPTH;
+    }
+
+    uint64_t move_time;
+    uint64_t wtime, btime, winc, binc;
+
+    int depth, moves_to_go;
+
+    bool ponder;
 };
 
 class SearchWorker;
+class SearchMaster;
 
 class PVLine
 {
@@ -43,33 +58,45 @@ class PVLine
         return moves[1];
     }
 
+    inline void set_empty() { length = 0; }
+
     std::string to_string() const;
 
   private:
     friend SearchWorker;
 
-    Move moves[MAX_DEPTH + 16];
+    Move moves[MAX_PV_LENGTH];
     int length;
+};
+
+enum SearchResultType
+{
+    BEST_RESULT,
+    INFO_RESULT
 };
 
 class SearchResult
 {
   public:
-    SearchResult(SearchResultType type, const PVLine& pv, BoardEval eval)
-        : result_type(type)
-        , eval(eval)
-    {
-        pv_line.copy(pv);
-    }
-
     constexpr SearchResultType type() const { return result_type; }
     constexpr const PVLine& pv() const { return pv_line; }
     constexpr BoardEval evaluation() const { return eval; }
+    constexpr uint64_t nodes() const { return nodes_searched; }
+    constexpr uint64_t depth() const { return depth_searched; }
+    constexpr uint64_t time_in_ms() const { return time_ms; }
 
   private:
+    friend SearchWorker;
+    friend SearchMaster;
+
+    SearchResult(SearchResultType type);
+
     SearchResultType result_type;
     PVLine pv_line;
+    int depth_searched;
     BoardEval eval;
+    uint64_t nodes_searched;
+    uint64_t time_ms;
 };
 
 class ISearchReceiver
@@ -90,20 +117,23 @@ class SearchMaster;
 class SearchWorker
 {
   private:
-    SearchWorker() {}
-
     friend SearchMaster;
+
+    SearchWorker();
 
     template<SearchNode Node>
     BoardEval alpha_beta(Board& board, StackFrame& f, BoardEval alpha, BoardEval beta, int depth);
 
     template<SearchNode Node>
-    BoardEval quiescence(Board& board, BoardEval alpha, BoardEval beta);
+    BoardEval quiescence(Board& board, StackFrame& f, BoardEval alpha, BoardEval beta);
 
     BoardEval iterative_deepening(ISearchReceiver& receiver, Board& board, int depth);
 
+    bool check_for_stop();
+
     SearchMaster* master;
     PVLine prev_pv;
+    std::atomic<uint64_t> nodes_searched;
 };
 
 class SearchMaster
@@ -112,30 +142,41 @@ class SearchMaster
     SearchMaster(int worker_count);
     ~SearchMaster();
 
-    void go(ISearchReceiver& receiver, Board& board, int depth, float time, bool ponder);
+    void go(ISearchReceiver& receiver, Board& board, const SearchConditions& conditions);
     void realise_ponder();
 
     inline void stop() { abort_search = true; }
+    void check_time();
     void wait_for();
 
-    inline void check_time();
-    inline bool should_stop() { return abort_search.load(std::memory_order_relaxed); }
+    inline bool is_aborted() { return abort_search.load(std::memory_order_relaxed); }
     inline bool is_searching() const { return in_search; }
+
+    inline Ms elapsed() const { return now() - start_time; }
+
     inline bool is_main_worker(const SearchWorker* worker) const { return worker == &workers[0]; }
+    uint64_t nodes_searched() const;
 
   private:
-    void start_search(ISearchReceiver& receiver, Board& board, int depth);
-    void start_timer(float time);
+    void start_search(ISearchReceiver& receiver, Board& board, const SearchConditions& conditions);
 
     void set_workers(int count);
 
     int worker_count;
     SearchWorker workers[MAX_WORKERS];
 
-    std::atomic<bool> in_search, abort_search, is_ponder;
-    std::thread search_thread, timer_thread;
+    TimeManager time_manager;
+    Ms start_time;
+
+    std::atomic<bool> in_search, abort_search, is_ponder, is_infinite;
+    std::thread search_thread;
 
     ISearchReceiver* search_receiver;
 };
+
+constexpr bool is_mate(BoardEval eval)
+{
+    return std::abs(eval) >= MATE_EVAL - MAX_PV_LENGTH && std::abs(eval) < INF_EVAL;
+}
 
 #endif

@@ -17,7 +17,7 @@ class TestResultReceiver : public ISearchReceiver
 
     void receive_search_result(const SearchResult& result) override
     {
-        if (result.type() == FINAL_BEST)
+        if (result.type() == BEST_RESULT)
             best_move = result.pv().first();
     }
 
@@ -31,13 +31,17 @@ Tester::Tester()
 {
 }
 
-void Tester::start_test(const TestSuite& suite, float time_per_pos)
+void Tester::start_test(const TestSuite& suite, uint64_t ms_per_pos)
 {
-    assert(time_per_pos > 0.0f);
+    assert(ms_per_pos > 0);
 
     Board board;
+
     SearchMaster searcher(1);
     TestResultReceiver res;
+
+    SearchConditions conditions;
+    conditions.move_time = ms_per_pos;
 
     size_t success_count = 0;
 
@@ -54,7 +58,7 @@ void Tester::start_test(const TestSuite& suite, float time_per_pos)
         board.set_fen(p.fen());
 
         // Run the test
-        searcher.go(res, board, MAX_DEPTH, time_per_pos, false);
+        searcher.go(res, board, conditions);
         searcher.wait_for();
 
         std::ostringstream out;

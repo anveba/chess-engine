@@ -64,7 +64,7 @@ class Tester
   public:
     Tester();
 
-    void start_test(const TestSuite& suite, float time_per_pos);
+    void start_test(const TestSuite& suite, uint64_t ms_per_pos);
 
   private:
 };

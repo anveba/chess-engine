@@ -15,4 +15,10 @@ constexpr bool iff(bool a, bool b)
     return implies(a, b) && implies(b, a);
 }
 
+template<typename T>
+constexpr int sign(T x)
+{
+    return (T(0) < x) - (x < T(0));
+}
+
 #endif

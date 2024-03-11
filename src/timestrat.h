@@ -1,12 +1,32 @@
 #ifndef TIMESTRAT_H_INCLUDED
 #define TIMESTRAT_H_INCLUDED
 
-#include <atomic>
+#include "chess.h"
 
-namespace TimeStrategy {
+#include <chrono>
 
-float one_twentieth(float wtime, float btime, float winc, float binc, int moves_to_go);
+using Ms = std::chrono::milliseconds::rep;
 
+inline Ms now()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
 }
+
+struct SearchConditions;
+
+class TimeManager
+{
+  public:
+    bool check();
+
+    void set(Colour side, const SearchConditions& conditions);
+    void start();
+
+  private:
+    Ms start_time;
+    Ms search_time;
+};
 
 #endif

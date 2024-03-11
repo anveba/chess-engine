@@ -36,7 +36,7 @@ constexpr BoardEval pawn_structure(const Board& board)
     // Encourage pawns defending pieces.
     Bitboard pawn_bb = board.occ(PAWN * Side);
     int defended = pop_count(pawn_capture_mask_bb<Side>(pawn_bb) & board.occ(Side));
-    return defended * 12;
+    return defended * 4;
 }
 
 template<Colour Side>

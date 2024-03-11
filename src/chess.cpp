@@ -214,10 +214,11 @@ Move Move::from_uci_notation(const Board& board, const std::string& notation)
         move_type = CASTLING_MOVE;
         Colour c = colour_of(moved_piece);
 
-        // Moves are encoded as the king moving to the rooks square, so we have to translate.
+        // Moves are encoded as the king moving to the rook's square, so we have to change the
+        // square moved to.
         assert(to_sq == square_wrt(c, SQ_C1) || to_sq == square_wrt(c, SQ_G1));
         to_sq = to_sq == square_wrt(c, SQ_C1) ? square_wrt(c, SQ_A1)
-                                              : square_wrt(c, SQ_G1);
+                                              : square_wrt(c, SQ_H1);
     }
 
     Move move;
