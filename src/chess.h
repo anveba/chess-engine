@@ -2,6 +2,7 @@
 #define CHESS_H_INCLUDED
 
 #include <cassert>
+#include <cstdint>
 #include <string>
 
 enum Colour : uint8_t

@@ -12,7 +12,9 @@ constexpr int NULL_MOVE_MIN_DEPTH = 4;
 
 static_assert(NULL_MOVE_REDUCTION < NULL_MOVE_MIN_DEPTH);
 
-static void put_first(Move* start, Move* end, Move new_first)
+// Swaps the given move with the first move in the list. If the move is not in the list,
+// nothing will happen.
+static void swap_with_first(Move* start, Move* end, Move new_first)
 {
     for (Move* move = start; move != end; move++) {
         if (*move == new_first) {
@@ -31,8 +33,9 @@ static bool zugzwang_risk(const Board& board)
 template<SearchNode Node>
 BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha, BoardEval beta, int depth)
 {
-    assert(Node == PV_NODE || beta - alpha == 1);
     assert(alpha < beta);
+    assert(implies(Node != PV_NODE, beta - alpha == 1));
+    assert(implies(f.is_leftmost, Node == PV_NODE));
 
     // Go into quiescence search when we reach the horizon.
     if (depth <= 0)
@@ -40,16 +43,23 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
 
     nodes_searched.fetch_add(1, std::memory_order_relaxed);
 
+    BoardEval original_alpha = alpha;
+
     MoveList moves;
     moves.generate<ALL_LEGAL_MOVES>(board);
 
     // We check if we have reached the end of the match.
     if (moves.size() == 0)
         return board.checkers() ? -MATE_EVAL + f.root_dist : 0;
+    if (board.is_draw_by_fifty_move() || board.treat_as_draw_by_repetition(f.root_dist))
+        return 0;
 
     // Prepare the next stack frame.
     StackFrame next_frame;
     next_frame.root_dist = f.root_dist + 1;
+
+    TableCluster* tcluster = master->ttable.get_cluster(board.hash());
+    // prefetch(tcluster);
 
     // Try null move to see if it causes a beta cutoff.
     // Assuming making a move is better than not making one, if a beta cutoff occurs with a null
@@ -75,25 +85,64 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
 
         board.unmake_null_move();
 
-        if (null_eval >= beta)
+        if (null_eval >= beta) {
+            // Insert null move as a lower bound in the table.
+            TableEntry* entry = master->ttable.insert(tcluster, board.hash(), depth);
+            if (entry) {
+                entry->hash = board.hash();
+                entry->set_flags(master->ttable.get_age(), LOWER_BOUND);
+                entry->depth = depth;
+                entry->eval = null_eval;
+                entry->best_move = Move::make_null();
+            }
+
             return null_eval;
+        }
     }
 
-    sort_moves(board, moves.begin(), moves.end());
+    bool move_put_first = false;
 
     // If we are on the PV of the previous iteration, we place the next move of the PV
     // first. We make sure that the last iterations PV is the first explored path.
-    if (Node == PV_NODE && f.is_leftmost && f.root_dist < prev_pv.len())
-        put_first(moves.begin(), moves.end(), prev_pv.moves[f.root_dist]);
+    if (Node == PV_NODE && f.is_leftmost && f.root_dist < prev_pv.len()) {
+        swap_with_first(moves.begin(), moves.end(), prev_pv.moves[f.root_dist]);
+        move_put_first = true;
+    }
 
-    BoardEval eval;
+    // Do not use transposition table in PV nodes.
+    if (Node != PV_NODE) {
+        TableEntry* entry = master->ttable.get(tcluster, board.hash());
+        if (entry && entry->depth >= depth) {
+
+            if (entry->bound() == LOWER_BOUND)
+                alpha = std::max(alpha, entry->eval);
+            else if (entry->bound() == UPPER_BOUND)
+                beta = std::min(beta, entry->eval);
+            else
+                return entry->eval;
+
+            if (alpha >= beta)
+                return alpha;
+
+            if (!entry->best_move.is_null()) {
+                swap_with_first(moves.begin(), moves.end(), entry->best_move);
+                move_put_first = true;
+            }
+        }
+    }
+
+    // Sort moves after swapping moves around in the move list. If a move has been placed first, it
+    // is skipped when sorting.
+    sort_moves(board, moves.begin() + size_t(move_put_first), moves.end());
+
+    BoardEval best_eval = -INF_EVAL;
+    Move best_move;
 
     // Consider every legal move
     for (Move move : moves) {
 
+        BoardEval eval;
         next_frame.pv.length = 0;
-
-        nodes_searched.fetch_add(1, std::memory_order_relaxed);
 
         BoardMemory memory;
         board.make_move(move, memory);
@@ -114,20 +163,24 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
             eval = -alpha_beta<NON_PV_NODE>(board, next_frame, -alpha - 1, -alpha, depth - 1);
 
             // If the null window search can raise alpha, do the full search.
-            if (alpha < eval && eval < beta) {
-                constexpr SearchNode next_node = Node == PV_NODE ? PV_NODE : NON_PV_NODE;
-
-                eval = -alpha_beta<next_node>(board, next_frame, -beta, -alpha, depth - 1);
-            }
+            if (Node == PV_NODE && eval > alpha && eval < beta)
+                eval = -alpha_beta<PV_NODE>(board, next_frame, -beta, -alpha, depth - 1);
         }
 
         board.unmake_move();
 
         // Check if the stopping criteria have been reached. We check before updating alpha since we cannot
-        // trust an aborted search.
+        // trust an aborted search which the evaluation is (likely) based on.
         if (check_for_stop())
             break;
 
+        // Data collection for the transposition table.
+        if (eval >= best_eval) {
+            best_eval = eval;
+            best_move = move;
+        }
+
+        // Check for cut-off.
         if (eval >= beta) {
             alpha = eval;
             break;
@@ -145,6 +198,21 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
         }
     }
 
+    // Add table entry. The evaluation may be -infinity if we have aborted in which case we
+    // don't want to store results from an incomplete search.
+    if (best_eval > -INF_EVAL) {
+        TableEntry* entry = master->ttable.insert(tcluster, board.hash(), depth);
+        if (entry) {
+            entry->hash = board.hash();
+            TableBound bound = best_eval >= beta ? LOWER_BOUND : (best_eval <= original_alpha ? UPPER_BOUND : EXACT);
+            assert(implies(bound == EXACT, Node == PV_NODE));
+            entry->set_flags(master->ttable.get_age(), bound);
+            entry->depth = depth;
+            entry->eval = best_eval;
+            entry->best_move = best_move;
+        }
+    }
+
     return alpha;
 }
 
@@ -154,12 +222,16 @@ BoardEval SearchWorker::quiescence(Board& board, StackFrame& f, BoardEval alpha,
     assert(Node == PV_NODE || beta - alpha == 1);
     assert(alpha < beta);
 
+    nodes_searched.fetch_add(1, std::memory_order_relaxed);
+
     MoveList moves;
     moves.generate<ALL_LEGAL_MOVES>(board);
 
     // We check if we have reached the end of the match.
     if (moves.size() == 0)
         return board.checkers() ? -MATE_EVAL + f.root_dist : 0;
+    if (board.is_draw_by_fifty_move() || board.treat_as_draw_by_repetition(f.root_dist))
+        return 0;
 
     // We assume that doing something is better than doing nothing, so the current static
     // evaluation serves as our lower bound.
@@ -176,23 +248,24 @@ BoardEval SearchWorker::quiescence(Board& board, StackFrame& f, BoardEval alpha,
     if (moves.size() == 0)
         return static_eval;
 
-    sort_moves(board, moves.begin(), moves.end());
+    bool move_put_first = false;
 
     // Place previous PV's move in front if this is a leftmost node.
-    if (Node == PV_NODE && f.is_leftmost && f.root_dist < prev_pv.len())
-        put_first(moves.begin(), moves.end(), prev_pv.moves[f.root_dist]);
+    if (Node == PV_NODE && f.is_leftmost && f.root_dist < prev_pv.len()) {
+        swap_with_first(moves.begin(), moves.end(), prev_pv.moves[f.root_dist]);
+        move_put_first = true;
+    }
+
+    sort_moves(board, moves.begin() + size_t(move_put_first), moves.end());
 
     // Prepare the next stack frame.
     StackFrame next_frame;
     next_frame.root_dist = f.root_dist + 1;
 
-    BoardEval eval;
-
     for (Move move : moves) {
 
+        BoardEval eval;
         next_frame.pv.length = 0;
-
-        nodes_searched.fetch_add(1, std::memory_order_relaxed);
 
         BoardMemory memory;
         board.make_move(move, memory);
@@ -210,11 +283,8 @@ BoardEval SearchWorker::quiescence(Board& board, StackFrame& f, BoardEval alpha,
             eval = -quiescence<NON_PV_NODE>(board, next_frame, -alpha - 1, -alpha);
 
             // If the null window search failed, do the full search.
-            if (alpha < eval && eval < beta) {
-                constexpr SearchNode next_node = Node == PV_NODE ? PV_NODE : NON_PV_NODE;
-
-                eval = -quiescence<next_node>(board, next_frame, -beta, -alpha);
-            }
+            if (Node == PV_NODE && eval > alpha && eval < beta)
+                eval = -quiescence<PV_NODE>(board, next_frame, -beta, -alpha);
         }
 
         board.unmake_move();
@@ -261,6 +331,13 @@ BoardEval SearchWorker::iterative_deepening(ISearchReceiver& receiver, Board& bo
         depth++;
 
         eval = alpha_beta<PV_NODE>(board, root_frame, -INF_EVAL, INF_EVAL, depth);
+
+        // std::cerr << "TT diagnostics (depth " << depth
+        //           << "):\n  hits      " << master->ttable.hits
+        //           << "\n  misses    " << master->ttable.misses
+        //           << "\n  rate      " << (float)master->ttable.hits / master->ttable.misses
+        //           << "\n  occupancy " << master->ttable.occupancy()
+        //           << "\n  slots     " << master->ttable.cluster_count() * CLUSTER_SIZE << std::endl;
 
         // Since we always search the previous PV first we can still use a partial search. In
         // the case of a partial search, we either find the previous PV is best, we find
@@ -320,6 +397,8 @@ void SearchMaster::start_search(ISearchReceiver& receiver, Board& board, const S
             time_manager.start();
     }
 
+    ttable.next_age();
+
     start_time = now();
 
     BoardEval eval = workers[0].iterative_deepening(receiver, board, conditions.depth);
@@ -370,16 +449,29 @@ SearchWorker::SearchWorker()
 {
 }
 
-SearchMaster::SearchMaster(int worker_count)
-    : in_search(false)
+SearchMaster::SearchMaster(size_t worker_count, size_t ttable_size)
+    : ttable(TTable(ttable_size))
+    , in_search(false)
     , search_receiver(nullptr)
 {
-    set_workers(worker_count);
+    set_worker_count(worker_count);
 }
 
 SearchMaster::~SearchMaster()
 {
     wait_for();
+}
+
+void SearchMaster::set_worker_count(size_t count)
+{
+    assert(!is_searching());
+    if (count == 0)
+        worker_count = std::thread::hardware_concurrency();
+    else
+        worker_count = count;
+
+    for (size_t i = 0; i < count; i++)
+        workers[i].master = this;
 }
 
 uint64_t SearchMaster::nodes_searched() const
@@ -390,17 +482,6 @@ uint64_t SearchMaster::nodes_searched() const
         total += workers[i].nodes_searched.load(std::memory_order_relaxed);
 
     return total;
-}
-
-void SearchMaster::set_workers(int count)
-{
-    assert(count > 0);
-    assert(!in_search);
-
-    worker_count = count;
-
-    for (int i = 0; i < count; i++)
-        workers[i].master = this;
 }
 
 void SearchMaster::wait_for()

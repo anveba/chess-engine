@@ -7,6 +7,7 @@
 #include "board.h"
 #include "eval.h"
 #include "timestrat.h"
+#include "ttable.h"
 
 constexpr size_t MAX_WORKERS = 256;
 constexpr int MAX_DEPTH = 255;
@@ -139,8 +140,10 @@ class SearchWorker
 class SearchMaster
 {
   public:
-    SearchMaster(int worker_count);
+    SearchMaster(size_t worker_count, size_t ttable_size);
     ~SearchMaster();
+
+    void set_worker_count(size_t count);
 
     void go(ISearchReceiver& receiver, Board& board, const SearchConditions& conditions);
     void realise_ponder();
@@ -157,10 +160,10 @@ class SearchMaster
     inline bool is_main_worker(const SearchWorker* worker) const { return worker == &workers[0]; }
     uint64_t nodes_searched() const;
 
+    TTable ttable;
+
   private:
     void start_search(ISearchReceiver& receiver, Board& board, const SearchConditions& conditions);
-
-    void set_workers(int count);
 
     int worker_count;
     SearchWorker workers[MAX_WORKERS];

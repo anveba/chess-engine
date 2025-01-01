@@ -31,13 +31,12 @@ Tester::Tester()
 {
 }
 
-void Tester::start_test(const TestSuite& suite, uint64_t ms_per_pos)
+void Tester::start_test(const TestSuite& suite, SearchMaster& searcher, uint64_t ms_per_pos)
 {
     assert(ms_per_pos > 0);
 
     Board board;
 
-    SearchMaster searcher(1);
     TestResultReceiver res;
 
     SearchConditions conditions;
@@ -50,10 +49,10 @@ void Tester::start_test(const TestSuite& suite, uint64_t ms_per_pos)
     for (const TestPosition& p : suite) {
 
         // Print test info
-        log_sync("test " + p.name() + "\n");
+        log_sync("test    " + p.name() + "\n");
         if (!p.comment().empty())
             log_sync("comment " + p.comment() + "\n");
-        log_sync("fen " + p.fen() + "\n");
+        log_sync("fen     " + p.fen() + "\n");
 
         board.set_fen(p.fen());
 
@@ -66,14 +65,14 @@ void Tester::start_test(const TestSuite& suite, uint64_t ms_per_pos)
         bool success = p.best_moves().empty() ? true : false;
 
         // Check success
-        out << "best ";
+        out << "best    ";
         for (Move m : p.best_moves()) {
             if (res.move() == m)
                 success = true;
             out << m.uci_notation() << " ";
         }
 
-        out << "\navoid ";
+        out << "\navoid   ";
         for (Move m : p.avoid_moves()) {
             if (res.move() == m)
                 success = false;
@@ -85,13 +84,13 @@ void Tester::start_test(const TestSuite& suite, uint64_t ms_per_pos)
         success_count += success;
 
         // Print result
-        out << "actual " << res.move().uci_notation() << "\n"
-            << "result " << (success ? "success" : "failure") << "\n\n";
+        out << "actual  " << res.move().uci_notation() << "\n"
+            << "result  " << (success ? "success" : "failure") << "\n\n";
 
         log_sync(out.str());
     }
 
-    log_sync("total " + std::to_string(success_count) + "/" + std::to_string(suite.size()) + "\n");
+    log_sync("total   " + std::to_string(success_count) + "/" + std::to_string(suite.size()) + "\n");
 }
 
 bool is_opcode(const std::string& token)
@@ -150,9 +149,9 @@ TestSuite TestSuite::from_file(const std::string& path)
             else if (op == "am")
                 avoids.push_back(Move::from_alg_notation(board, token));
             else if (op == "id")
-                id += token + " ";
+                id += (id.empty() ? "" : " ") + token;
             else if (op == "c0")
-                c0 += token + " ";
+                c0 += (c0.empty() ? "" : " ") + token;
             else
                 assert(0);
 

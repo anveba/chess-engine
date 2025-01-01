@@ -83,7 +83,10 @@ BoardEval estimate(const Board& board, Move move)
 
 void sort_moves(const Board& board, Move* start, Move* end)
 {
-    assert(start != end);
+    assert(start <= end);
+
+    if (start == end)
+        return;
 
     BoardEval move_values[MAX_MOVES];
 

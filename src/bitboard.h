@@ -60,7 +60,7 @@ struct MagicEntry
 extern MagicEntry rook_magic[SQ_MAX];
 extern MagicEntry bishop_magic[SQ_MAX];
 
-void precompute_bb();
+void precompute_bitboards();
 
 constexpr Bitboard bb_set(Square sq)
 {

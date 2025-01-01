@@ -1,29 +1,25 @@
 CC := g++
-FLAGS := -Wall -std=c++17 -march=native
+FLAGS := -DNO_MAIN -Wall -std=c++17 -march=native
 DEBUG_FLAGS = -p -g3
-RELEASE_FLAGS = -O3 -flto -DNDEBUG
-INCLUDE := -Isrc
+RELEASE_FLAGS = -O3 -flto
+INCLUDE := -I../../src -I../ 
 
 CCFLAGS := $(FLAGS) $(INCLUDE)
-LDFLAGS := $(FLAGS)
+
+SRC := ../../src/*.cpp ../*.cpp *.cpp
 
 BIN_PATH := bin
-OBJ_PATH := obj
-SRC_PATH := src
 
-TARGET_NAME := chess
+TARGET_NAME := fenfilter
 TARGET := $(BIN_PATH)/$(TARGET_NAME)
 
-SRC := $(foreach x, $(SRC_PATH), $(wildcard $(addprefix $(x)/*,.c*)))
-OBJ := $(addprefix $(OBJ_PATH)/, $(addsuffix .o, $(notdir $(basename $(SRC)))))
-
-CLEAN_LIST := $(TARGET) $(OBJ)
+CLEAN_LIST := $(TARGET)
 
 default: release
 
 .PHONY: makedir
 makedir:
-	@mkdir -p $(BIN_PATH) $(OBJ_PATH)
+	@mkdir -p $(BIN_PATH)
 
 .PHONY: release
 release: makedir

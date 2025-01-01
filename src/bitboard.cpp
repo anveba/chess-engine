@@ -234,7 +234,7 @@ static void precompute_whole_line_table()
     }
 }
 
-void precompute_bb()
+void precompute_bitboards()
 {
     precompute_king_tables();
     precompute_knight_tables();

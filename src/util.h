@@ -4,6 +4,7 @@
 #include <string>
 
 void log_sync(const std::string& str);
+void log_error_sync(const std::string& str);
 
 constexpr bool implies(bool a, bool b)
 {
@@ -20,5 +21,7 @@ constexpr int sign(T x)
 {
     return (T(0) < x) - (x < T(0));
 }
+
+void prefetch(void* ptr);
 
 #endif

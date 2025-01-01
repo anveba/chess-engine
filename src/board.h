@@ -10,7 +10,7 @@
 
 using BoardHash = uint64_t;
 
-void precompute_zobrist();
+void precompute_board_constants();
 
 class BoardMemory
 {
@@ -21,6 +21,7 @@ class BoardMemory
     friend class Board;
 
     void operator>>(BoardMemory& to);
+    std::string move_history_str();
 
     Piece captured;
     Move move;
@@ -47,7 +48,9 @@ class Board
     constexpr Piece at(Square sq) const { return board[sq]; }
     constexpr Colour side() const { return side_to_move; }
     constexpr uint32_t fifty_move_counter() const { return head->fifty_move_counter; }
+    constexpr bool is_draw_by_fifty_move() const { return head->fifty_move_counter >= 100; }
     constexpr uint32_t current_fullmove() const { return fullmove_counter; }
+    constexpr uint32_t current_halfmove() const { return (fullmove_counter - 1) * 2 + (side() == WHITE ? 0 : 1); }
     constexpr BoardHash hash() const { return head->hash; }
     BoardHash make_full_hash() const;
 
@@ -68,6 +71,10 @@ class Board
     constexpr Bitboard pinned() const { return head->pinned; }
     constexpr Bitboard checkers() const { return head->checkers; }
 
+    bool treat_as_draw_by_repetition(uint8_t root_dist) const;
+    bool is_draw_by_repetition() const;
+    uint32_t repetitions() const;
+
     inline bool is_loud(Move move) const;
     constexpr bool previous_was_null_move() const { return head->move.is_null(); }
     bool is_valid() const;
@@ -80,6 +87,7 @@ class Board
     std::string fen() const;
     void set_fen(const std::string& fen);
     std::string as_image_str() const;
+    std::string move_history_str() const { return head->move_history_str(); }
 
   private:
     void clear();
@@ -100,8 +108,6 @@ class Board
     Bitboard occupancy;
     Bitboard colour_occupancy[COLOUR_MAX];
     Bitboard piece_occupancy[MAX_PIECE];
-
-    CastlingRights relevant_castle[SQ_MAX];
 
     BoardMemory root, *head;
 };

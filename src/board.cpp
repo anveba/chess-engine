@@ -6,12 +6,14 @@
 #include "rng.h"
 #include "util.h"
 
-uint64_t piece_sq_key[MAX_PIECE][SQ_MAX];
-uint64_t black_to_move_key;
-uint64_t castling_rights_key[MAX_CASTLE];
-uint64_t ep_rights_key[MAX_EP];
+static uint64_t piece_sq_key[MAX_PIECE][SQ_MAX];
+static uint64_t black_to_move_key;
+static uint64_t castling_rights_key[MAX_CASTLE];
+static uint64_t ep_rights_key[MAX_EP];
+static CastlingRights relevant_castle[SQ_MAX];
+static bool precomputation_done = false;
 
-void precompute_zobrist()
+void precompute_board_constants()
 {
     Splitmix64 sm(1);
     Xshiro256 rng(sm.next(), sm.next(), sm.next(), sm.next());
@@ -27,6 +29,18 @@ void precompute_zobrist()
 
     for (int i = 0; i < MAX_EP; i++)
         ep_rights_key[i] = rng.next();
+
+    for (Square sq = SQ_ZERO; sq < SQ_MAX; sq++)
+        relevant_castle[sq] = NO_CASTLING_RIGHTS;
+
+    relevant_castle[SQ_A1] = CASTLING_W_QUEENSIDE;
+    relevant_castle[SQ_H1] = CASTLING_W_KINGSIDE;
+    relevant_castle[SQ_A8] = CASTLING_B_QUEENSIDE;
+    relevant_castle[SQ_H8] = CASTLING_B_KINGSIDE;
+    relevant_castle[SQ_E1] = CASTLING_W;
+    relevant_castle[SQ_E8] = CASTLING_B;
+
+    precomputation_done = true;
 }
 
 void BoardMemory::operator>>(BoardMemory& to)
@@ -34,7 +48,7 @@ void BoardMemory::operator>>(BoardMemory& to)
     to.castling_rights = castling_rights;
     to.ep_rights = NO_EP_RIGHTS;
     to.fifty_move_counter = fifty_move_counter;
-    to.hash = hash;
+    to.hash = hash ^ ep_rights_key[ep_rights];
 
     to.previous = this;
 }
@@ -68,7 +82,7 @@ void Board::make_move(Move move, BoardMemory& memory)
     head = &memory;
     memory.move = move;
 
-    Piece moved_piece = at(move.from_sq());
+    head->hash ^= castling_rights_key[head->previous->castling_rights];
 
     if (move.is_promotion()) {
         memory.captured = at(move.to_sq());
@@ -80,6 +94,10 @@ void Board::make_move(Move move, BoardMemory& memory)
         head->castling_rights -= relevant_castle[move.to_sq()];
 
         memory.fifty_move_counter = 0;
+
+        head->hash ^= piece_sq_key[PAWN * side()][move.from_sq()];
+        head->hash ^= piece_sq_key[memory.captured][move.to_sq()];
+        head->hash ^= piece_sq_key[move.promotion_to() * side()][move.to_sq()];
 
     } else if (move.is_castle()) {
         memory.captured = NO_PIECE;
@@ -97,15 +115,27 @@ void Board::make_move(Move move, BoardMemory& memory)
 
         memory.fifty_move_counter++;
 
+        head->hash ^= piece_sq_key[KING * side()][move.from_sq()];
+        head->hash ^= piece_sq_key[KING * side()][king_to];
+        head->hash ^= piece_sq_key[ROOK * side()][move.to_sq()];
+        head->hash ^= piece_sq_key[ROOK * side()][rook_to];
+
     } else if (move.is_ep()) {
+        Piece moved_piece = at(move.from_sq());
         memory.captured = PAWN * ~side();
 
         move_piece(move.from_sq(), move.to_sq());
-        remove_piece(sq_move(move.to_sq(), side() == WHITE ? SOUTH : NORTH));
+        Square captured_pawn_sq = sq_move(move.to_sq(), side() == WHITE ? SOUTH : NORTH);
+        remove_piece(captured_pawn_sq);
 
         memory.fifty_move_counter = 0;
 
+        head->hash ^= piece_sq_key[moved_piece][move.from_sq()];
+        head->hash ^= piece_sq_key[memory.captured][captured_pawn_sq];
+        head->hash ^= piece_sq_key[moved_piece][move.to_sq()];
+
     } else {
+        Piece moved_piece = at(move.from_sq());
         memory.captured = move_piece(move.from_sq(), move.to_sq());
 
         if (type_of(moved_piece) == PAWN && std::abs(rank_of(move.from_sq()) - rank_of(move.to_sq())) > 1)
@@ -118,15 +148,25 @@ void Board::make_move(Move move, BoardMemory& memory)
             memory.fifty_move_counter = 0;
         else
             memory.fifty_move_counter++;
+
+        head->hash ^= piece_sq_key[moved_piece][move.from_sq()];
+        head->hash ^= piece_sq_key[memory.captured][move.to_sq()];
+        head->hash ^= piece_sq_key[moved_piece][move.to_sq()];
     }
 
     // Increment fullmove counter when black has moved
+    static_assert(BLACK == 1);
     fullmove_counter += side_to_move;
 
     side_to_move = ~side_to_move;
+
     head->hash ^= black_to_move_key;
+    head->hash ^= ep_rights_key[head->ep_rights];
+    head->hash ^= castling_rights_key[head->castling_rights];
 
     recalculate_transients();
+
+    assert(is_valid());
 }
 
 void Board::unmake_move()
@@ -138,6 +178,7 @@ void Board::unmake_move()
     side_to_move = ~side_to_move;
 
     // Decrement fullmove counter when black has unmoved
+    static_assert(BLACK == 1);
     fullmove_counter -= side_to_move;
 
     if (move.is_promotion()) {
@@ -168,6 +209,8 @@ void Board::unmake_move()
     }
 
     head = head->previous;
+
+    assert(is_valid());
 }
 
 Piece Board::move_piece(Square from, Square to)
@@ -251,15 +294,19 @@ void Board::make_null_move(BoardMemory& memory)
     memory.move = Move::make_null();
 
     head->ep_rights = NO_EP_RIGHTS;
+    head->hash ^= ep_rights_key[head->ep_rights];
 
     head->fifty_move_counter++;
 
+    static_assert(BLACK == 1);
     fullmove_counter += side_to_move;
 
     side_to_move = ~side_to_move;
     head->hash ^= black_to_move_key;
 
     recalculate_transients();
+
+    assert(is_valid());
 }
 
 void Board::unmake_null_move()
@@ -269,24 +316,77 @@ void Board::unmake_null_move()
     side_to_move = ~side_to_move;
     head->hash ^= black_to_move_key;
 
+    static_assert(BLACK == 1);
     fullmove_counter -= side_to_move;
 
     head = head->previous;
+
+    assert(is_valid());
 }
 
 Board::Board()
 {
+    assert(precomputation_done);
     clear();
+}
 
-    for (Square sq = SQ_ZERO; sq < SQ_MAX; sq++)
-        relevant_castle[sq] = NO_CASTLING_RIGHTS;
+bool Board::treat_as_draw_by_repetition(uint8_t root_dist) const
+{
+    // To ensure the search tree is a DAG, we consider the first repetition in the search
+    // tree (dist < root_dist) as a draw by repetition. If a position is reached twice in
+    // the search tree, it is safe to assume that it will occur again, leading to the draw
+    // by repetition, so we can treat the first repetition as the draw.
+    uint32_t reps = 0, dist = 0;
+    BoardMemory* mem = head;
+    while (1) {
+        if (!(mem->previous && mem->previous->previous) ||
+            mem->fifty_move_counter - mem->previous->previous->fifty_move_counter != 2)
+            break;
+        dist += 2;
+        reps += mem->previous->previous->hash == head->hash;
+        if ((reps == 1 && dist < root_dist) || reps >= 2)
+            return true;
+        mem = mem->previous->previous;
+    }
+    return false;
+}
 
-    relevant_castle[SQ_A1] = CASTLING_W_QUEENSIDE;
-    relevant_castle[SQ_H1] = CASTLING_W_KINGSIDE;
-    relevant_castle[SQ_A8] = CASTLING_B_QUEENSIDE;
-    relevant_castle[SQ_H8] = CASTLING_B_KINGSIDE;
-    relevant_castle[SQ_E1] = CASTLING_W;
-    relevant_castle[SQ_E8] = CASTLING_B;
+bool Board::is_draw_by_repetition() const
+{
+    if (head->fifty_move_counter < 4) {
+        assert(repetitions() < 2);
+        return false;
+    }
+    uint32_t reps = 0;
+    BoardMemory* mem = head;
+    while (1) {
+        if (!(mem->previous && mem->previous->previous) ||
+            mem->fifty_move_counter - mem->previous->previous->fifty_move_counter != 2)
+            break;
+        reps += mem->previous->previous->hash == head->hash;
+        if (reps >= 2) {
+            assert(repetitions() >= 2);
+            return true;
+        }
+        mem = mem->previous->previous;
+    }
+    assert(repetitions() < 2);
+    return false;
+}
+
+uint32_t Board::repetitions() const
+{
+    uint32_t reps = 0;
+    BoardMemory* mem = head;
+    while (1) {
+        if (!(mem->previous && mem->previous->previous) ||
+            mem->fifty_move_counter - mem->previous->previous->fifty_move_counter != 2)
+            break;
+        reps += mem->previous->previous->hash == head->hash;
+        mem = mem->previous->previous;
+    }
+    assert((reps >= 2) == is_draw_by_repetition());
+    return reps;
 }
 
 std::string Board::fen() const
@@ -408,6 +508,9 @@ void Board::set_fen(const std::string& fen)
 
 bool Board::is_valid() const
 {
+    if (fullmove_counter == 0)
+        return false;
+
     // Check rook and king positions are correct when castling is available.
     for (Colour c : { WHITE, BLACK }) {
         if (!implies(castling_rights() & (CASTLING_ALL & c), at(square_wrt(c, SQ_E1)) == c * KING))
@@ -431,15 +534,19 @@ bool Board::is_valid() const
     if (occ(WHITE * PAWN) & RANK_1 || occ(BLACK * PAWN) & RANK_8)
         return false;
 
-    // Check hash (TODO: hashing in make/unmake_move)
-    // if (head->hash != make_full_hash())
-    //    return false;
+    // Check hash.
+    if (head->hash != make_full_hash())
+        return false;
 
-    // Check if there is exactly one of each king and if the other colour's king
-    // is in check.
-    return pop_count(occ(WHITE * KING)) == 1 &&
-           pop_count(occ(BLACK * KING)) == 1 &&
-           !threats_to<true>(~side(), lsb_idx(occ(~side() * KING)), occ());
+    // Check if there is exactly one of each king.
+    if (pop_count(occ(WHITE * KING)) != 1 || pop_count(occ(BLACK * KING)) != 1)
+        return false;
+
+    // Check if the other colour's king is in check.
+    if (threats_to<true>(~side(), lsb_idx(occ(~side() * KING)), occ()))
+        return false;
+
+    return true;
 }
 
 BoardHash Board::make_full_hash() const
@@ -475,9 +582,16 @@ void Board::clear()
     root.ep_rights = NO_EP_RIGHTS;
     root.fifty_move_counter = 0;
     root.pinned = root.checkers = BB_EMPTY;
-    root.hash = 0;
     root.previous = nullptr;
     head = &root;
+    root.hash = make_full_hash();
+}
+
+std::string BoardMemory::move_history_str()
+{
+    if (previous == nullptr || previous->move.is_none())
+        return move.uci_notation();
+    return previous->move_history_str() + " " + move.uci_notation();
 }
 
 std::string Board::as_image_str() const
@@ -495,6 +609,8 @@ std::string Board::as_image_str() const
     ss << "  a b c d e f g h  \n";
     ss << "Active colour: " << std::string(side_to_move == WHITE ? "White" : "Black") << "\n";
     ss << "FEN: " << fen() << "\n";
+    ss << "History: " << head->move_history_str() << "\n";
+    ss << "Repetitions: " << repetitions() << "\n";
     ss << "Hash: " << head->hash;
 
     return ss.str();

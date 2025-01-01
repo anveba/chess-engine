@@ -183,6 +183,10 @@ bool Move::is_legal(const Board& board) const
 
 Move Move::from_uci_notation(const Board& board, const std::string& notation)
 {
+    if (notation == "none" || notation == "(none)")
+        return Move::make_none();
+    if (notation == "null" || notation == "(null)")
+        return Move::make_null();
     PieceType promotion_to = NO_PIECE_TYPE;
     MoveType move_type = NORMAL_MOVE;
 
@@ -221,14 +225,14 @@ Move Move::from_uci_notation(const Board& board, const std::string& notation)
                                               : square_wrt(c, SQ_H1);
     }
 
-    Move move;
+    Move move = Move::make_none();
     if (move_type == NORMAL_MOVE)
         move = Move::make_normal(from_sq, to_sq);
     else if (move_type == EP_MOVE)
         move = Move::make_ep(from_sq, to_sq);
     else if (move_type == CASTLING_MOVE)
         move = Move::make_castle(from_sq, to_sq);
-    else
+    else if (move_type == PROMOTION_MOVE)
         move = Move::make_promotion(from_sq, to_sq, promotion_to);
 
     assert(move.is_legal(board));
