@@ -12,34 +12,30 @@ enum TableBound : uint8_t
     EXACT = 3,
 };
 
-struct TableEntry
+struct TableCluster;
+
+class TEntryHandle
 {
-    BoardHash hash;
+  public:
     BoardEval eval;
     Move best_move;
     uint8_t depth;
+    TableBound bound;
 
-    // Bits 0 and 1 indicate the bound. Bits 2..7 indicate the age.
-    int8_t flags;
-
-    uint8_t age() const { return flags & 0b11111100; }
-    TableBound bound() const { return TableBound(flags & 0b00000011); }
-    void set_flags(uint8_t age, TableBound bound)
+  private:
+    TableCluster* cluster;
+    BoardHash hash;
+    TEntryHandle(BoardEval eval, Move best_move, uint8_t depth, TableBound bound, TableCluster* cluster, BoardHash hash)
+        : eval(eval)
+        , best_move(best_move)
+        , depth(depth)
+        , bound(bound)
+        , cluster(cluster)
+        , hash(hash)
     {
-        assert(bound < 4);
-        assert(!(age & 0b00000011));
-        flags = age | bound;
     }
+    friend class TTable;
 };
-
-constexpr size_t CLUSTER_SIZE = 4;
-
-struct TableCluster
-{
-    TableEntry entries[CLUSTER_SIZE];
-};
-
-static_assert(sizeof(TableCluster) % 32 == 0);
 
 class TTable
 {
@@ -50,9 +46,8 @@ class TTable
     void resize(size_t size_in_mb);
     void clear();
 
-    TableCluster* get_cluster(BoardHash hash);
-    TableEntry* insert(TableCluster* cluster, BoardHash hash, uint8_t depth);
-    TableEntry* get(TableCluster* cluster, BoardHash hash);
+    void insert(TEntryHandle& handle, BoardEval eval, Move best_move, uint8_t depth, TableBound bound);
+    std::tuple<bool, TEntryHandle> get(BoardHash hash);
     void set_age(uint8_t age) { current_age = age << 2; }
     void next_age() { current_age = (current_age + (1 << 2)); }
 
@@ -65,6 +60,8 @@ class TTable
     float occupancy();
 
   private:
+    TableCluster* get_cluster(BoardHash hash);
+
     TableCluster* table;
     size_t size;
     uint8_t current_age;

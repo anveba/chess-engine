@@ -1,25 +1,166 @@
 #include "eval.h"
 
+#include "piecetables.h"
+
+constexpr BoardEval PIECE_VALUES[MAX_PIECE_TYPE] = { 0, 100, 500, 320, 330, 900, 10000 };
+constexpr BoardEval MOBILITY = 10;
+
+constexpr BoardEval PAWN_DEFEND = 4;
+constexpr BoardEval ISOLATED_PAWN = -2;
+constexpr BoardEval DOUBLED_PAWN = -7;
+constexpr BoardEval BLOCKED_PAWN_ON_RANK[8] = { 0, -2, -3, -5, -7, -10, -13, 0 };
+constexpr BoardEval PASSED_PAWN_ON_RANK[8] = { 0, 0, 3, 9, 16, 25, 36, 0 };
+
+constexpr BoardEval BISHOP_PAIR = 20;
+constexpr BoardEval BISHOP_PAWN_BLOCKER = -8;
+
+constexpr BoardEval KNIGHT_KING_CLOSENESS[16] = { 28, 26, 22, 19, 16, 13, 10, 8, 6, 5, 4, 3, 2, 1, 0, 0 };
+
+constexpr BoardEval ROOK_KING_CLOSENESS[8] = { 12, 10, 8, 6, 4, 2, 0, 0 };
+
+constexpr BoardEval QUEEN_KING_CLOSENESS[16] = { 28, 26, 22, 19, 16, 13, 10, 8, 6, 5, 4, 3, 2, 1, 0, 0 };
+
 constexpr BoardEval value_of(PieceType p)
 {
-    constexpr BoardEval PIECE_VALUES[MAX_PIECE_TYPE] = { 0, 100, 500, 320, 330, 900, 10000 };
     return PIECE_VALUES[p];
 }
 
-// Returns +1 for white and -1 for black.
-constexpr BoardEval colour_sign(Colour c)
+template<Colour Side>
+constexpr BoardEval evaluate_rooks(const Board& board)
 {
-    return c * -2 + 1;
+    Bitboard rook_bb = board.occ(Side * ROOK);
+    BoardEval eval = pop_count(rook_bb) * value_of(ROOK);
+    const Square enemy_king_sq = lsb_idx(board.occ(~Side * KING));
+
+    while (rook_bb) {
+        Square sq = square_wrt(Side, pop_lsb(rook_bb));
+        eval += ROOK_EVAL_TABLE[sq];
+
+        // Reward closeness to enemy king
+        int dist = std::min(std::abs(file_of(enemy_king_sq) - file_of(sq)),
+                            std::abs(rank_of(enemy_king_sq) - rank_of(sq)));
+        eval += ROOK_KING_CLOSENESS[dist];
+    }
+    return eval;
 }
 
 template<Colour Side>
-constexpr BoardEval material_count(const Board& board)
+constexpr BoardEval evaluate_knights(const Board& board)
 {
-    return pop_count(board.occ(Side * PAWN)) * value_of(PAWN) +
-           pop_count(board.occ(Side * ROOK)) * value_of(ROOK) +
-           pop_count(board.occ(Side * KNIGHT)) * value_of(KNIGHT) +
-           pop_count(board.occ(Side * BISHOP)) * value_of(BISHOP) +
-           pop_count(board.occ(Side * QUEEN)) * value_of(QUEEN);
+    Bitboard knight_bb = board.occ(Side * KNIGHT);
+    const Square enemy_king_sq = lsb_idx(board.occ(~Side * KING));
+    BoardEval eval = pop_count(knight_bb) * value_of(KNIGHT);
+
+    while (knight_bb) {
+
+        Square sq = square_wrt(Side, pop_lsb(knight_bb));
+        eval += KNIGHT_EVAL_TABLE[sq];
+
+        // Reward closeness to enemy king
+        int dist = std::abs(file_of(enemy_king_sq) - file_of(sq)) +
+                   std::abs(rank_of(enemy_king_sq) - rank_of(sq));
+        eval += KNIGHT_KING_CLOSENESS[dist];
+    }
+    return eval;
+}
+
+template<Colour Side>
+constexpr BoardEval evaluate_bishops(const Board& board)
+{
+    Bitboard bishop_bb = board.occ(Side * BISHOP);
+    BoardEval eval = pop_count(bishop_bb) * value_of(BISHOP);
+
+    // Reward having both bishops
+    if (pop_count(bishop_bb) >= 2)
+        eval += BISHOP_PAIR;
+
+    // Punish having blockers directly next by
+    Bitboard neighbour_bb = bb_shift<NORTH_WEST>(bishop_bb) |
+                            bb_shift<NORTH_EAST>(bishop_bb) |
+                            bb_shift<SOUTH_WEST>(bishop_bb) |
+                            bb_shift<SOUTH_EAST>(bishop_bb);
+    int pawn_blockers = pop_count(neighbour_bb & (board.occ(Side * PAWN) | board.occ(~Side * PAWN)));
+    eval += BISHOP_PAWN_BLOCKER * pawn_blockers;
+
+    while (bishop_bb) {
+        Square sq = square_wrt(Side, pop_lsb(bishop_bb));
+        eval += BISHOP_EVAL_TABLE[sq];
+    }
+    return eval;
+}
+
+template<Colour Side>
+constexpr BoardEval evaluate_queens(const Board& board)
+{
+    Bitboard queen_bb = board.occ(Side * QUEEN);
+    const Square enemy_king_sq = lsb_idx(board.occ(~Side * KING));
+    BoardEval eval = pop_count(queen_bb) * value_of(QUEEN);
+    while (queen_bb) {
+        Square sq = square_wrt(Side, pop_lsb(queen_bb));
+        eval += QUEEN_EVAL_TABLE[sq];
+
+        // Reward closeness to enemy king
+        int dist = std::min(std::abs(file_of(enemy_king_sq) - file_of(sq)),
+                            std::abs(rank_of(enemy_king_sq) - rank_of(sq)));
+        eval += QUEEN_KING_CLOSENESS[dist];
+    }
+    return eval;
+}
+
+template<Colour Side>
+constexpr BoardEval evaluate_king(const Board& board)
+{
+    Bitboard king_bb = board.occ(Side * KING);
+    assert(pop_count(king_bb) == 1);
+    BoardEval eval = KING_EVAL_TABLE[square_wrt(Side, lsb_idx(king_bb))];
+    return eval;
+}
+
+template<Colour Side>
+constexpr BoardEval evaluate_pawns(const Board& board)
+{
+    const Bitboard pawn_bb = board.occ(Side * PAWN);
+    const Bitboard all_opponent_bb = board.occ(~Side);
+    const Bitboard opponent_pawn_bb = board.occ(~Side * PAWN);
+    BoardEval eval = pop_count(pawn_bb) * value_of(PAWN);
+
+    for (int i = 0; i < 8; i++) {
+        Bitboard file_bb = FILE_A << i;
+        Bitboard pawns_in_file_bb = pawn_bb & file_bb;
+        int num_pawns = pop_count(pawns_in_file_bb);
+
+        while (pawns_in_file_bb) {
+            Square sq = square_wrt(Side, pop_lsb(pawns_in_file_bb));
+            eval += PAWN_EVAL_TABLE[sq];
+        }
+
+        // Reward passed pawns and punish isolated, doubled, and pawns blocked by an opponent
+        // piece directly in front.
+        if (num_pawns == 0) {
+            eval += ISOLATED_PAWN;
+        } else if (num_pawns == 1) {
+            const int relative_rank = rank_wrt(Side, rank_of(lsb_idx(pawn_bb)));
+
+            Bitboard front_bb = front_fill<Side>(bb_shift<forward(Side)>(pawn_bb));
+            front_bb = front_bb | bb_shift<EAST>(front_bb) | bb_shift<WEST>(front_bb);
+            const Bitboard pawn_blockers_bb = opponent_pawn_bb & front_bb;
+            if (!pawn_blockers_bb)
+                eval += PASSED_PAWN_ON_RANK[relative_rank];
+
+            const Bitboard direct_blockers_bb = all_opponent_bb & bb_shift<forward(Side)>(pawn_bb);
+            if (direct_blockers_bb)
+                eval += BLOCKED_PAWN_ON_RANK[relative_rank];
+
+        } else {
+            eval += DOUBLED_PAWN;
+        }
+    }
+
+    // Encourage pawns defending pieces.
+    int defended = pop_count(pawn_capture_mask_bb<Side>(pawn_bb) & board.occ(Side));
+    eval += PAWN_DEFEND * defended;
+
+    return eval;
 }
 
 template<Colour Side>
@@ -27,24 +168,19 @@ constexpr BoardEval mobility(const Board& board)
 {
     MoveList moves;
     moves.generate<PSEUDO_MOVES>(board);
-    return moves.size() * 10;
-}
-
-template<Colour Side>
-constexpr BoardEval pawn_structure(const Board& board)
-{
-    // Encourage pawns defending pieces.
-    Bitboard pawn_bb = board.occ(PAWN * Side);
-    int defended = pop_count(pawn_capture_mask_bb<Side>(pawn_bb) & board.occ(Side));
-    return defended * 4;
+    return MOBILITY * moves.size();
 }
 
 template<Colour Side>
 BoardEval evaluate_side(const Board& board)
 {
-    return material_count<Side>(board) +
-           mobility<Side>(board) +
-           pawn_structure<Side>(board);
+    return evaluate_pawns<Side>(board) +
+           evaluate_rooks<Side>(board) +
+           evaluate_knights<Side>(board) +
+           evaluate_bishops<Side>(board) +
+           evaluate_queens<Side>(board) +
+           evaluate_king<Side>(board) +
+           mobility<Side>(board);
 }
 
 BoardEval evaluate(const Board& board)

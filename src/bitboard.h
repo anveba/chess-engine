@@ -139,8 +139,7 @@ constexpr Bitboard piece_move_mask(Square from)
 template<Colour C>
 constexpr Bitboard pawn_move_mask_bb(Bitboard bb)
 {
-    return C == WHITE ? bb_shift<NORTH>(bb)
-                      : bb_shift<SOUTH>(bb);
+    return bb_shift<forward(C)>(bb);
 }
 
 constexpr Bitboard pawn_move_mask_bb(Colour c, Bitboard bb)
@@ -182,6 +181,34 @@ constexpr Bitboard pawn_capture_mask_sq(Square sq)
 inline Bitboard pawn_capture_mask_sq(Colour c, Square sq)
 {
     return pawn_capture_masks[c][sq];
+}
+
+constexpr Bitboard north_fill(Bitboard bb)
+{
+    bb |= (bb << 8);
+    bb |= (bb << 16);
+    bb |= (bb << 32);
+    return bb;
+}
+
+constexpr Bitboard south_fill(Bitboard bb)
+{
+    bb |= (bb >> 8);
+    bb |= (bb >> 16);
+    bb |= (bb >> 32);
+    return bb;
+}
+
+template<Colour C>
+constexpr Bitboard front_fill(Bitboard bb)
+{
+    return C == WHITE ? north_fill(bb) : south_fill(bb);
+}
+
+template<Colour C>
+constexpr Bitboard rear_fill(Bitboard bb)
+{
+    return C == WHITE ? south_fill(bb) : north_fill(bb);
 }
 
 // Returns a bitboard with the bits corresponding to the squares

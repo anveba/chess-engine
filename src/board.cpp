@@ -385,7 +385,6 @@ uint32_t Board::repetitions() const
         reps += mem->previous->previous->hash == head->hash;
         mem = mem->previous->previous;
     }
-    assert((reps >= 2) == is_draw_by_repetition());
     return reps;
 }
 

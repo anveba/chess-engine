@@ -7,7 +7,7 @@
 #include "util.h"
 
 constexpr int64_t DEFAULT_THREAD_COUNT = 1;
-constexpr int64_t DEFAULT_TABLE_SIZE = 32;
+constexpr int64_t DEFAULT_TABLE_SIZE = 64;
 
 UCI::UCI()
     : searcher(DEFAULT_THREAD_COUNT, DEFAULT_TABLE_SIZE)

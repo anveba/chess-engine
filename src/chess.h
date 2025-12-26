@@ -35,6 +35,11 @@ constexpr Direction operator~(Direction dir)
     return Direction(-dir);
 }
 
+constexpr Direction forward(Colour c)
+{
+    return c == WHITE ? NORTH : SOUTH;
+}
+
 constexpr uint8_t BOARD_LEN = 8;
 
 using Square = uint8_t;
@@ -97,10 +102,17 @@ constexpr Square square_of(int rank, int file)
 }
 
 // Returns the relative square. The same square is returned for white, but
-// corresponding square on the other side of the board is return for black.
+// corresponding square on the other side of the board is returned for black.
 constexpr Square square_wrt(Colour c, Square sq)
 {
     return Square(sq ^ (c * 56));
+}
+
+// Returns the relative rank. The same rank is returned for white and the
+// 'inverse' rank is returned for black.
+constexpr int rank_wrt(Colour c, int rank)
+{
+    return c == WHITE ? c : (BOARD_LEN - rank - 1);
 }
 
 constexpr Direction direction_between(Square from, Square to)

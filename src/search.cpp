@@ -7,6 +7,8 @@
 #include "rng.h"
 #include "util.h"
 
+constexpr int QUIESCENCE_DEPTH = 0;
+
 constexpr int NULL_MOVE_REDUCTION = 3;
 constexpr int NULL_MOVE_MIN_DEPTH = 4;
 
@@ -22,7 +24,6 @@ static void swap_with_first(Move* start, Move* end, Move new_first)
             return;
         }
     }
-    assert(0);
 }
 
 static bool zugzwang_risk(const Board& board)
@@ -41,7 +42,7 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
     if (depth <= 0)
         return quiescence<Node>(board, f, alpha, beta);
 
-    nodes_searched.fetch_add(1, std::memory_order_relaxed);
+    nodes_searched.store(nodes_searched.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
 
     BoardEval original_alpha = alpha;
 
@@ -54,12 +55,24 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
     if (board.is_draw_by_fifty_move() || board.treat_as_draw_by_repetition(f.root_dist))
         return 0;
 
+    auto [tt_hit, tt_handle] = master->ttable.get(board.hash());
+
+    // Check for TT cut off. Do not use transposition table in PV nodes.
+    if (Node != PV_NODE && tt_hit && tt_handle.depth >= depth) {
+        if (tt_handle.bound == LOWER_BOUND)
+            alpha = std::max(alpha, tt_handle.eval);
+        else if (tt_handle.bound == UPPER_BOUND)
+            beta = std::min(beta, tt_handle.eval);
+        else
+            return tt_handle.eval;
+
+        if (alpha >= beta)
+            return alpha;
+    }
+
     // Prepare the next stack frame.
     StackFrame next_frame;
     next_frame.root_dist = f.root_dist + 1;
-
-    TableCluster* tcluster = master->ttable.get_cluster(board.hash());
-    // prefetch(tcluster);
 
     // Try null move to see if it causes a beta cutoff.
     // Assuming making a move is better than not making one, if a beta cutoff occurs with a null
@@ -86,57 +99,23 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
         board.unmake_null_move();
 
         if (null_eval >= beta) {
-            // Insert null move as a lower bound in the table.
-            TableEntry* entry = master->ttable.insert(tcluster, board.hash(), depth);
-            if (entry) {
-                entry->hash = board.hash();
-                entry->set_flags(master->ttable.get_age(), LOWER_BOUND);
-                entry->depth = depth;
-                entry->eval = null_eval;
-                entry->best_move = Move::make_null();
-            }
-
+            master->ttable.insert(tt_handle, null_eval, tt_handle.best_move, depth, LOWER_BOUND);
             return null_eval;
         }
     }
 
-    bool move_put_first = false;
-
     // If we are on the PV of the previous iteration, we place the next move of the PV
     // first. We make sure that the last iterations PV is the first explored path.
-    if (Node == PV_NODE && f.is_leftmost && f.root_dist < prev_pv.len()) {
-        swap_with_first(moves.begin(), moves.end(), prev_pv.moves[f.root_dist]);
-        move_put_first = true;
-    }
-
-    // Do not use transposition table in PV nodes.
-    if (Node != PV_NODE) {
-        TableEntry* entry = master->ttable.get(tcluster, board.hash());
-        if (entry && entry->depth >= depth) {
-
-            if (entry->bound() == LOWER_BOUND)
-                alpha = std::max(alpha, entry->eval);
-            else if (entry->bound() == UPPER_BOUND)
-                beta = std::min(beta, entry->eval);
-            else
-                return entry->eval;
-
-            if (alpha >= beta)
-                return alpha;
-
-            if (!entry->best_move.is_null()) {
-                swap_with_first(moves.begin(), moves.end(), entry->best_move);
-                move_put_first = true;
-            }
-        }
-    }
+    if (Node == PV_NODE && f.is_leftmost && f.root_dist < prev_pv.len())
+        tt_handle.best_move = prev_pv.moves[f.root_dist];
 
     // Sort moves after swapping moves around in the move list. If a move has been placed first, it
     // is skipped when sorting.
-    sort_moves(board, moves.begin() + size_t(move_put_first), moves.end());
+    if (tt_handle.best_move.is_proper())
+        swap_with_first(moves.begin(), moves.end(), tt_handle.best_move);
+    sort_moves(board, moves.begin() + size_t(tt_handle.best_move.is_proper()), moves.end());
 
     BoardEval best_eval = -INF_EVAL;
-    Move best_move;
 
     // Consider every legal move
     for (Move move : moves) {
@@ -177,7 +156,7 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
         // Data collection for the transposition table.
         if (eval >= best_eval) {
             best_eval = eval;
-            best_move = move;
+            tt_handle.best_move = move;
         }
 
         // Check for cut-off.
@@ -201,16 +180,9 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
     // Add table entry. The evaluation may be -infinity if we have aborted in which case we
     // don't want to store results from an incomplete search.
     if (best_eval > -INF_EVAL) {
-        TableEntry* entry = master->ttable.insert(tcluster, board.hash(), depth);
-        if (entry) {
-            entry->hash = board.hash();
-            TableBound bound = best_eval >= beta ? LOWER_BOUND : (best_eval <= original_alpha ? UPPER_BOUND : EXACT);
-            assert(implies(bound == EXACT, Node == PV_NODE));
-            entry->set_flags(master->ttable.get_age(), bound);
-            entry->depth = depth;
-            entry->eval = best_eval;
-            entry->best_move = best_move;
-        }
+        TableBound bound = best_eval >= beta ? LOWER_BOUND : (best_eval <= original_alpha ? UPPER_BOUND : EXACT);
+        assert(implies(bound == EXACT, Node == PV_NODE));
+        master->ttable.insert(tt_handle, best_eval, tt_handle.best_move, depth, bound);
     }
 
     return alpha;
@@ -222,7 +194,7 @@ BoardEval SearchWorker::quiescence(Board& board, StackFrame& f, BoardEval alpha,
     assert(Node == PV_NODE || beta - alpha == 1);
     assert(alpha < beta);
 
-    nodes_searched.fetch_add(1, std::memory_order_relaxed);
+    nodes_searched.store(nodes_searched.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
 
     MoveList moves;
     moves.generate<ALL_LEGAL_MOVES>(board);
@@ -233,14 +205,18 @@ BoardEval SearchWorker::quiescence(Board& board, StackFrame& f, BoardEval alpha,
     if (board.is_draw_by_fifty_move() || board.treat_as_draw_by_repetition(f.root_dist))
         return 0;
 
+    // Using the TT in quiescence seems to not be beneficial, perhaps because the current evaluation
+    // function is fast.
+
     // We assume that doing something is better than doing nothing, so the current static
     // evaluation serves as our lower bound.
     const BoardEval static_eval = evaluate(board);
 
-    if (static_eval >= beta)
+    if (static_eval >= beta) {
         return static_eval;
-    else if (alpha < static_eval)
+    } else if (alpha < static_eval) {
         alpha = static_eval;
+    }
 
     moves.filter_quiet(board);
 
@@ -248,15 +224,16 @@ BoardEval SearchWorker::quiescence(Board& board, StackFrame& f, BoardEval alpha,
     if (moves.size() == 0)
         return static_eval;
 
-    bool move_put_first = false;
+    Move best_move = Move::make_none();
 
     // Place previous PV's move in front if this is a leftmost node.
-    if (Node == PV_NODE && f.is_leftmost && f.root_dist < prev_pv.len()) {
-        swap_with_first(moves.begin(), moves.end(), prev_pv.moves[f.root_dist]);
-        move_put_first = true;
-    }
+    if (Node == PV_NODE && f.is_leftmost && f.root_dist < prev_pv.len())
+        best_move = prev_pv.moves[f.root_dist];
 
-    sort_moves(board, moves.begin() + size_t(move_put_first), moves.end());
+    if (best_move.is_proper())
+        swap_with_first(moves.begin(), moves.end(), best_move);
+
+    sort_moves(board, moves.begin() + size_t(best_move.is_proper()), moves.end());
 
     // Prepare the next stack frame.
     StackFrame next_frame;
