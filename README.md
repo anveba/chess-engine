@@ -9,8 +9,10 @@ A chess engine compliant with UCI.
 - And many search heuristics
 
 **To-do**:
+- Better board evaluation!
+- More elaborate time management
 - Multithreading
-- Currently has a weak static board evaluation
+- More search heuristics
 
 # Compilation
 The chess engine can be compiled using the Makefile in the root directory. Makefiles to compile the included tools are present in their respective directories. 

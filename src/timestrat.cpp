@@ -7,7 +7,7 @@
 
 bool TimeManager::check()
 {
-    return now() - start_time >= search_time - 12;
+    return now() - start_time >= search_time - 9;
 }
 
 void TimeManager::set(Colour side, const SearchConditions& conditions)
@@ -19,7 +19,7 @@ void TimeManager::set(Colour side, const SearchConditions& conditions)
     if (conditions.move_time > 0)
         time_to_spend = conditions.move_time;
     else
-        time_to_spend = (side == WHITE ? conditions.wtime : conditions.btime) / 20;
+        time_to_spend = (side == WHITE ? conditions.wtime : conditions.btime) / 20; // TODO: follow a better strategy
 
     search_time = Ms(time_to_spend);
 }
