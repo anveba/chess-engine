@@ -19,4 +19,5 @@ The chess engine can be compiled using the Makefile in the root directory. Makef
 In the tools directory, the source code of programs used for testing can be found. This includes
  - a program to pit two UCI-compliant programs against each other to determine which is stronger,
  - and a program to collect FEN strings of positions where both sides are roughly equal.
+
 Furthermore, the engine can run tests of specific positions with a known best move.
