@@ -32,11 +32,15 @@ int8_t make_flags(uint8_t age, TableBound bound)
     return age | bound;
 }
 
-TTable::TTable(size_t size_in_mb)
+TTable::TTable(size_t size_in_mib)
     : table(nullptr)
+    , size(0)
     , current_age(0)
 {
-    resize(size_in_mb);
+    if (!resize(size_in_mib)) {
+        std::cerr << "Failed to allocate memory for transposition table." << std::endl;
+        exit(1);
+    }
 }
 
 TTable::~TTable()
@@ -44,21 +48,23 @@ TTable::~TTable()
     std::free(table);
 }
 
-void TTable::resize(size_t size_in_mb)
+bool TTable::resize(size_t size_in_mib)
 {
-    std::free(table);
+    const size_t new_size = (size_in_mib << 20) / sizeof(TableCluster);
+    assert(new_size > 0);
 
-    size = (size_in_mb * 1000000) / sizeof(TableCluster);
-    assert(size > 0);
-
+    // aligned_alloc requires the size to be a multiple of the alignment.
     constexpr size_t page_size = 4096;
-    table = static_cast<TableCluster*>(std::aligned_alloc(page_size, size * sizeof(TableCluster)));
-    if (!table) {
-        std::cerr << "Failed to allocate memory for transposition table." << std::endl;
-        exit(1);
-    }
+    const size_t bytes = (new_size * sizeof(TableCluster) + page_size - 1) / page_size * page_size;
+    TableCluster* new_table = static_cast<TableCluster*>(std::aligned_alloc(page_size, bytes));
+    if (!new_table)
+        return false;
 
+    std::free(table);
+    table = new_table;
+    size = new_size;
     clear();
+    return true;
 }
 
 void TTable::clear()
@@ -75,7 +81,7 @@ TableCluster* TTable::get_cluster(BoardHash hash)
     return table + index;
 }
 
-std::tuple<bool, TEntryHandle> TTable::get(BoardHash hash)
+TTProbe TTable::get(BoardHash hash)
 {
     TableCluster* cluster = get_cluster(hash);
 

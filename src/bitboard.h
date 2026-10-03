@@ -30,6 +30,7 @@ constexpr Bitboard RANK_6 = RANK_1 << 40;
 constexpr Bitboard RANK_7 = RANK_1 << 48;
 constexpr Bitboard RANK_8 = RANK_1 << 56;
 
+constexpr Bitboard LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 constexpr Bitboard CENTER_SQUARES = ~(FILE_A | FILE_H | RANK_1 | RANK_8);
 
 extern Bitboard king_move_masks[SQ_MAX];
@@ -209,6 +210,16 @@ template<Colour C>
 constexpr Bitboard rear_fill(Bitboard bb)
 {
     return C == WHITE ? south_fill(bb) : north_fill(bb);
+}
+
+constexpr Bitboard bb_file(int file)
+{
+    return FILE_A << file;
+}
+
+constexpr Bitboard bb_adjacent_files(int file)
+{
+    return bb_shift<EAST>(bb_file(file)) | bb_shift<WEST>(bb_file(file));
 }
 
 // Returns a bitboard with the bits corresponding to the squares

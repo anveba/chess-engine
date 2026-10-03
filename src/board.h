@@ -71,7 +71,8 @@ class Board
     constexpr Bitboard pinned() const { return head->pinned; }
     constexpr Bitboard checkers() const { return head->checkers; }
 
-    bool treat_as_draw_by_repetition(uint8_t root_dist) const;
+    bool is_insufficient_material() const;
+    bool treat_as_draw_by_repetition(int root_dist) const;
     bool is_draw_by_repetition() const;
     uint32_t repetitions() const;
 
@@ -85,7 +86,8 @@ class Board
     inline Bitboard threats_to(Colour side, Square sq, Bitboard occup) const;
 
     std::string fen() const;
-    void set_fen(const std::string& fen);
+    std::string mirrored_fen() const;
+    bool set_fen(const std::string& fen); // False for an invalid FEN
     std::string as_image_str() const;
     std::string move_history_str() const { return head->move_history_str(); }
 
@@ -99,6 +101,7 @@ class Board
     Piece remove_piece(Square sq);
 
     void recalculate_transients() const;
+    bool has_legal_ep_capture() const;
 
     Piece board[SQ_MAX];
 

@@ -2,3 +2,7 @@
 bin
 obj
 test
+tools/elo/results
+*.pyc
+*.csv
+tools/sprt/results

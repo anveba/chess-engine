@@ -10,8 +10,6 @@ constexpr BoardEval MATE_EVAL = 30000;
 constexpr BoardEval INF_EVAL = 32000;
 
 BoardEval evaluate(const Board& board);
-BoardEval estimate(const Board& board, Move move);
-
-void sort_moves(const Board& board, Move* start, Move* end);
+std::string eval_trace(const Board& board); // Per-term breakdown of evaluate().
 
 #endif

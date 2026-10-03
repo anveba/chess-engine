@@ -71,6 +71,9 @@ class UCI
     void new_game();
     void start_perft(std::istringstream& in);
     void start_test(std::istringstream& in);
+    void start_bench(std::istringstream& in);
+    std::string legal_moves_str();
+    std::string move_order_str();
 
   private:
     std::vector<UCIOption> options;

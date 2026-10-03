@@ -1,30 +1,105 @@
 #include "timestrat.h"
 
+#include <algorithm>
+#include <iterator>
+
 #include "search.h"
 
-#include <chrono>
-#include <thread>
+// See https://www.chessprogramming.org/Time_Management.
 
-bool TimeManager::check()
+constexpr Ms MIN_TIME_MS = 1;
+constexpr int DEFAULT_MOVES_TO_GO = 30;
+constexpr int MAX_MOVES_TO_GO = 50;
+constexpr double INCREMENT_FRACTION_TO_USE_PER_MOVE = 0.75;
+constexpr double HARD_LIMIT_FACTOR_OF_SOFT = 4.0;
+constexpr double MIN_HARD_FRACTION_OF_REMAINING = 0.3;
+constexpr double MAX_HARD_FRACTION_OF_REMAINING = 0.9;
+
+constexpr double LATEST_START_TIME_FRACTION = 0.5;
+
+constexpr double STABILITY_SCALE[] = { 1.5, 1.2, 1.0, 0.8, 0.7, 0.65 };
+constexpr int MAX_STABILITY_INDEX = int(std::size(STABILITY_SCALE)) - 1;
+
+constexpr double DEFAULT_PER_ITERATION_GROWTH = 4.0;
+constexpr double MIN_PER_ITERATION_GROWTH = 1.5;
+constexpr double MAX_PER_ITERATION_GROWTH = 10.0;
+constexpr Us MIN_MEASURABLE_ITERATION_US = 200;
+constexpr double MAX_PREDICTED_OVERSHOOT = 2.0;
+
+constexpr int EVAL_DROP_MARGIN = 25;
+constexpr double EVAL_DROP_SCALE = 1.5;
+constexpr int STABLE_MATE_ITERATIONS = 2;
+
+TimeLimits TimeManager::compute_limits(Colour side, const SearchConditions& conditions, Ms move_overhead)
 {
-    return now() - start_time >= search_time - 9;
+    if (conditions.move_time > 0) {
+        const Ms time = std::max(Ms(conditions.move_time) - move_overhead, MIN_TIME_MS);
+        return { time, time, true };
+    }
+
+    const Ms remaining = side == WHITE ? conditions.wtime : conditions.btime;
+    const Ms increment = side == WHITE ? conditions.winc : conditions.binc;
+    const double available = std::max(remaining - move_overhead, MIN_TIME_MS);
+
+    const int horizon = conditions.moves_to_go > 0 ? std::min(conditions.moves_to_go, MAX_MOVES_TO_GO) : DEFAULT_MOVES_TO_GO;
+    const double max_fraction = std::clamp(HARD_LIMIT_FACTOR_OF_SOFT / horizon, MIN_HARD_FRACTION_OF_REMAINING, MAX_HARD_FRACTION_OF_REMAINING);
+
+    const double soft = available / horizon + increment * INCREMENT_FRACTION_TO_USE_PER_MOVE;
+    const double hard = std::min(soft * HARD_LIMIT_FACTOR_OF_SOFT, available * max_fraction);
+
+    return { std::max(Ms(std::min(soft, hard)), MIN_TIME_MS), std::max(Ms(hard), MIN_TIME_MS), false };
 }
 
-void TimeManager::set(Colour side, const SearchConditions& conditions)
+void TimeManager::init(Colour side, const SearchConditions& conditions, Ms move_overhead)
 {
-    assert(conditions.move_time > 0 || (conditions.wtime > 0 && conditions.btime > 0));
+    limits = compute_limits(side, conditions, move_overhead);
+    previous_best = Move::make_none();
+    stable_iterations = 0;
+    stable_mate_iterations = 0;
+    evals[0] = evals[1] = 0;
+    previous_duration = 0;
 
-    uint64_t time_to_spend;
-
-    if (conditions.move_time > 0)
-        time_to_spend = conditions.move_time;
-    else
-        time_to_spend = (side == WHITE ? conditions.wtime : conditions.btime) / 20; // TODO: follow a better strategy
-
-    search_time = Ms(time_to_spend);
+    start();
 }
 
 void TimeManager::start()
 {
-    start_time = now();
+    start_time = now_us();
+}
+
+bool TimeManager::should_stop_at_iteration(const IterationInfo& iteration, Us elapsed)
+{
+    // Update historical data
+    stable_iterations = iteration.best_move == previous_best ? stable_iterations + 1 : 0;
+    previous_best = iteration.best_move;
+    stable_mate_iterations = is_mate(iteration.eval) && iteration.eval == evals[0] ? stable_mate_iterations + 1 : 0;
+    const bool score_dropped = iteration.depth > 2 && iteration.eval < evals[1] - EVAL_DROP_MARGIN;
+    evals[1] = evals[0];
+    evals[0] = iteration.eval;
+    const Us prev_dur = previous_duration;
+    previous_duration = iteration.duration;
+
+    // Easy stops
+    if (limits.is_fixed_time)
+        return false;
+    if (iteration.root_moves == 1 || stable_mate_iterations >= STABLE_MATE_ITERATIONS)
+        return true;
+
+    // Adjust target time
+    double additional_time_factor = STABILITY_SCALE[std::min(stable_iterations, MAX_STABILITY_INDEX)];
+    if (score_dropped)
+        additional_time_factor *= EVAL_DROP_SCALE;
+
+    const double target_us = std::min(limits.soft * additional_time_factor, double(limits.hard)) * 1000;
+
+    if (elapsed >= target_us * LATEST_START_TIME_FRACTION)
+        return true;
+
+    // Predict next iteration's time
+    const double predicted_iteration_growth = prev_dur >= MIN_MEASURABLE_ITERATION_US
+                              ? std::clamp(double(iteration.duration) / prev_dur, MIN_PER_ITERATION_GROWTH, MAX_PER_ITERATION_GROWTH)
+                              : DEFAULT_PER_ITERATION_GROWTH;
+    const double predicted_finish = elapsed + iteration.duration * predicted_iteration_growth;
+
+    return predicted_finish > std::min(target_us * MAX_PREDICTED_OVERSHOOT, limits.hard * 1000.0);
 }

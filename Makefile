@@ -1,39 +1,85 @@
 CC := g++
 FLAGS := -Wall -std=c++17 -march=native
-DEBUG_FLAGS = -p -g3
-RELEASE_FLAGS = -O3 -flto -DNDEBUG
 INCLUDE := -Isrc
 
-CCFLAGS := $(FLAGS) $(INCLUDE)
-LDFLAGS := $(FLAGS)
+RELEASE_FLAGS := -O3 -flto -DNDEBUG
+DEBUG_FLAGS := -O1 -g
+PROFILE_FLAGS := -O2 -g -p -DNDEBUG
+STATS_FLAGS := -O3 -DNDEBUG -DSEARCH_STATS
+SANITIZE_FLAGS := -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+TSAN_FLAGS := -O1 -g -fsanitize=thread
+TEST_FLAGS := -O2 -g -DNO_MAIN -Itests/unit -DTEST_DATA_DIR=\"$(CURDIR)/tests/data\"
 
 BIN_PATH := bin
-OBJ_PATH := obj
-SRC_PATH := src
 
-TARGET_NAME := chess
-TARGET := $(BIN_PATH)/$(TARGET_NAME)
-
-SRC := $(foreach x, $(SRC_PATH), $(wildcard $(addprefix $(x)/*,.c*)))
-OBJ := $(addprefix $(OBJ_PATH)/, $(addsuffix .o, $(notdir $(basename $(SRC)))))
-
-CLEAN_LIST := $(TARGET) $(OBJ)
+SRC := $(wildcard src/*.cpp)
+HEADERS := $(wildcard src/*.h)
+TEST_SRC := $(wildcard tests/unit/*.cpp)
+TEST_HEADERS := $(wildcard tests/unit/*.h)
 
 default: release
 
-.PHONY: makedir
-makedir:
-	@mkdir -p $(BIN_PATH) $(OBJ_PATH)
+.PHONY: release debug profile stats sanitize tsan
+release: $(BIN_PATH)/chess          # Optimised engine.
+debug: $(BIN_PATH)/chess-debug      # Asserts on, debug info, no profiling.
+profile: $(BIN_PATH)/chess-profile  # For gprof. Writes gmon.out when run.
+stats: $(BIN_PATH)/chess-stats      # Prints search statistics after each iteration.
+sanitize: $(BIN_PATH)/chess-asan    # AddressSanitizer and UndefinedBehaviorSanitizer.
+tsan: $(BIN_PATH)/chess-tsan        # ThreadSanitizer.
 
-.PHONY: release
-release: makedir
-	$(CC) -o $(TARGET) $(SRC) $(CCFLAGS) $(RELEASE_FLAGS)
+$(BIN_PATH):
+	@mkdir -p $(BIN_PATH)
 
-.PHONY: debug
-debug: makedir
-	$(CC) -o $(TARGET) $(SRC) $(CCFLAGS) $(DEBUG_FLAGS)
+$(BIN_PATH)/chess: $(SRC) $(HEADERS) | $(BIN_PATH)
+	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(RELEASE_FLAGS)
+
+$(BIN_PATH)/chess-debug: $(SRC) $(HEADERS) | $(BIN_PATH)
+	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(DEBUG_FLAGS)
+
+$(BIN_PATH)/chess-profile: $(SRC) $(HEADERS) | $(BIN_PATH)
+	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(PROFILE_FLAGS)
+
+$(BIN_PATH)/chess-stats: $(SRC) $(HEADERS) | $(BIN_PATH)
+	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(STATS_FLAGS)
+
+$(BIN_PATH)/chess-asan: $(SRC) $(HEADERS) | $(BIN_PATH)
+	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(SANITIZE_FLAGS)
+
+$(BIN_PATH)/chess-tsan: $(SRC) $(HEADERS) | $(BIN_PATH)
+	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(TSAN_FLAGS)
+
+# Unit tests are built with asserts on.
+$(BIN_PATH)/tests: $(SRC) $(HEADERS) $(TEST_SRC) $(TEST_HEADERS) | $(BIN_PATH)
+	$(CC) -o $@ $(SRC) $(TEST_SRC) $(FLAGS) $(INCLUDE) $(TEST_FLAGS)
+
+$(BIN_PATH)/tests-asan: $(SRC) $(HEADERS) $(TEST_SRC) $(TEST_HEADERS) | $(BIN_PATH)
+	$(CC) -o $@ $(SRC) $(TEST_SRC) $(FLAGS) $(INCLUDE) $(TEST_FLAGS) $(SANITIZE_FLAGS)
+
+.PHONY: test test-unit test-uci test-sanitize test-tsan test-all
+test: test-unit test-uci
+
+test-unit: $(BIN_PATH)/tests
+	./$(BIN_PATH)/tests
+
+test-uci: $(BIN_PATH)/chess
+	python3 tests/uci_test.py ./$(BIN_PATH)/chess
+
+test-sanitize: $(BIN_PATH)/tests-asan $(BIN_PATH)/chess-asan
+	./$(BIN_PATH)/tests-asan
+	python3 tests/uci_test.py ./$(BIN_PATH)/chess-asan
+
+test-tsan: $(BIN_PATH)/chess-tsan
+	TSAN_OPTIONS=halt_on_error=1 setarch $$(uname -m) -R python3 tests/uci_test.py ./$(BIN_PATH)/chess-tsan
+
+test-all: test test-sanitize test-tsan
+
+BASE ?= HEAD
+OPENINGS ?= tests/data/positions.txt
+.PHONY: sprt
+sprt:
+	python3 tools/sprt/sprt.py --base $(BASE) --openings $(OPENINGS) --output-dir tools/sprt/results \
+		$(if $(FASTCHESS),--fastchess $(FASTCHESS)) $(SPRT_ARGS)
 
 .PHONY: clean
 clean:
-	@echo CLEAN $(CLEAN_LIST)
-	@rm -f $(CLEAN_LIST)
+	rm -rf $(BIN_PATH) gmon.out

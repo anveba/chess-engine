@@ -1,0 +1,35 @@
+# Takes about 10-15 minutes. Ratings from the CCRL Blitz list (Sep 26, 2026).
+
+[match]
+tc = "10+0.1"
+games_per_opponent = 100
+concurrency = 10
+openings = "../../../tests/data/positions.txt"
+hash = 64
+timemargin = 50
+
+draw = { movenumber = 40, movecount = 8, score = 10 }
+resign = { movecount = 4, score = 1000 }
+
+[engine]
+name = "Chrunch"
+options = {}
+
+[[opponent]]
+name = "Weiss 0.9"
+cmd = "weiss/weiss-0.9"
+rating = 2650
+rating_error = 19
+
+[[opponent]]
+name = "Stash 21.0"
+cmd = "stash/stash-21.0"
+rating = 2713
+rating_error = 14
+options = { "Move Overhead" = 100 }
+
+[[opponent]]
+name = "Weiss 0.10"
+cmd = "weiss/weiss-0.10"
+rating = 2847
+rating_error = 17

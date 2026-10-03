@@ -37,17 +37,23 @@ class TEntryHandle
     friend class TTable;
 };
 
+struct TTProbe
+{
+    bool hit;
+    TEntryHandle handle;
+};
+
 class TTable
 {
   public:
     TTable(size_t size_in_mb);
     ~TTable();
 
-    void resize(size_t size_in_mb);
+    bool resize(size_t size_in_mib); // False on failure
     void clear();
 
     void insert(TEntryHandle& handle, BoardEval eval, Move best_move, uint8_t depth, TableBound bound);
-    std::tuple<bool, TEntryHandle> get(BoardHash hash);
+    TTProbe get(BoardHash hash);
     void set_age(uint8_t age) { current_age = age << 2; }
     void next_age() { current_age = (current_age + (1 << 2)); }
 

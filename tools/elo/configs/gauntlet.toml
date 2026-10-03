@@ -1,0 +1,80 @@
+# Takes about 6-7 hours.
+# Opponents with known ratings from the CCRL Blitz list (Sep 26, 2026):
+# https://computerchess.org.uk/ccrl/404/rating_list_all.html
+
+[match]
+tc = "30+0.3"
+games_per_opponent = 320
+concurrency = 10
+openings = "../../../tests/data/positions.txt"
+hash = 64
+timemargin = 50
+
+draw = { movenumber = 40, movecount = 8, score = 10 }
+resign = { movecount = 4, score = 1000 }
+
+[engine]
+name = "Chrunch"
+options = {}
+
+[[opponent]]
+name = "Berserk 2.0.0"
+cmd = "berserk/berserk-2.0.0"
+rating = 2528
+rating_error = 17
+
+[[opponent]]
+name = "Tantabus 2.0.0"
+cmd = "tantabus/tantabus-2.0.0"
+rating = 2555
+rating_error = 13
+
+[[opponent]]
+name = "WyldChess 1.51"
+cmd = "wyldchess/wyldchess-1.51"
+rating = 2603
+rating_error = 12
+
+[[opponent]]
+name = "Weiss 0.9"
+cmd = "weiss/weiss-0.9"
+rating = 2650
+rating_error = 19
+
+[[opponent]]
+name = "Stash 21.0"
+cmd = "stash/stash-21.0"
+rating = 2713
+rating_error = 14
+options = { "Move Overhead" = 100 }
+
+[[opponent]]
+name = "Halogen 8"
+cmd = "halogen/halogen-8"
+rating = 2827
+rating_error = 17
+
+[[opponent]]
+name = "Weiss 0.10"
+cmd = "weiss/weiss-0.10"
+rating = 2847
+rating_error = 17
+
+[[opponent]]
+name = "Weiss 1.0"
+cmd = "weiss/weiss-1.0"
+rating = 2896
+rating_error = 18
+
+[[opponent]]
+name = "Berserk 3.2.0"
+cmd = "berserk/berserk-3.2.0"
+rating = 2910
+rating_error = 17
+
+[[opponent]]
+name = "Stash 25.0"
+cmd = "stash/stash-25.0"
+rating = 2933
+rating_error = 18
+options = { "Move Overhead" = 100 }

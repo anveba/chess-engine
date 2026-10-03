@@ -1,8 +1,10 @@
 #include "board.h"
 
+#include <algorithm>
 #include <cassert>
 #include <sstream>
 
+#include "movegen.h"
 #include "rng.h"
 #include "util.h"
 
@@ -41,6 +43,11 @@ void precompute_board_constants()
     relevant_castle[SQ_E8] = CASTLING_B;
 
     precomputation_done = true;
+}
+
+static bool can_capture_ep(const Board& board, Colour capturer, Square passed_sq)
+{
+    return pawn_capture_mask_sq(~capturer, passed_sq) & board.occ(PAWN * capturer);
 }
 
 void BoardMemory::operator>>(BoardMemory& to)
@@ -138,7 +145,8 @@ void Board::make_move(Move move, BoardMemory& memory)
         Piece moved_piece = at(move.from_sq());
         memory.captured = move_piece(move.from_sq(), move.to_sq());
 
-        if (type_of(moved_piece) == PAWN && std::abs(rank_of(move.from_sq()) - rank_of(move.to_sq())) > 1)
+        if (type_of(moved_piece) == PAWN && std::abs(rank_of(move.from_sq()) - rank_of(move.to_sq())) > 1 &&
+            can_capture_ep(*this, ~side(), (move.from_sq() + move.to_sq()) / 2))
             head->ep_rights = file_to_ep(file_of(move.from_sq()));
 
         head->castling_rights -= relevant_castle[move.from_sq()];
@@ -160,13 +168,25 @@ void Board::make_move(Move move, BoardMemory& memory)
 
     side_to_move = ~side_to_move;
 
+    // Before the hash
+    recalculate_transients();
+
+    // En passant rights only when the move is legal
+    if (head->ep_rights != NO_EP_RIGHTS && !has_legal_ep_capture())
+        head->ep_rights = NO_EP_RIGHTS;
+
     head->hash ^= black_to_move_key;
     head->hash ^= ep_rights_key[head->ep_rights];
     head->hash ^= castling_rights_key[head->castling_rights];
 
-    recalculate_transients();
-
     assert(is_valid());
+}
+
+bool Board::has_legal_ep_capture() const
+{
+    MoveList moves;
+    moves.generate<LOUD_MOVES>(*this);
+    return std::any_of(moves.begin(), moves.end(), [](Move move) { return move.is_ep(); });
 }
 
 void Board::unmake_move()
@@ -330,17 +350,33 @@ Board::Board()
     clear();
 }
 
-bool Board::treat_as_draw_by_repetition(uint8_t root_dist) const
+bool Board::is_insufficient_material() const
+{
+    for (PieceType p : { PAWN, ROOK, QUEEN })
+        if (occ(WHITE * p) | occ(BLACK * p))
+            return false;
+
+    const Bitboard bishops = occ(W_BISHOP) | occ(B_BISHOP);
+    const Bitboard minors = bishops | occ(W_KNIGHT) | occ(B_KNIGHT);
+
+    // A singular minor piece or only bishops that are all on the same square colour.
+    return pop_count(minors) <= 1 ||
+           (minors == bishops && (!(bishops & LIGHT_SQUARES) || !(bishops & ~LIGHT_SQUARES)));
+}
+
+bool Board::treat_as_draw_by_repetition(int root_dist) const
 {
     // To ensure the search tree is a DAG, we consider the first repetition in the search
     // tree (dist < root_dist) as a draw by repetition. If a position is reached twice in
     // the search tree, it is safe to assume that it will occur again, leading to the draw
     // by repetition, so we can treat the first repetition as the draw.
-    uint32_t reps = 0, dist = 0;
+    int reps = 0, dist = 0;
     BoardMemory* mem = head;
     while (1) {
+        // Positions on the other side of a null move cannot count as repetitions.
         if (!(mem->previous && mem->previous->previous) ||
-            mem->fifty_move_counter - mem->previous->previous->fifty_move_counter != 2)
+            mem->fifty_move_counter - mem->previous->previous->fifty_move_counter != 2 ||
+            mem->move.is_null() || mem->previous->move.is_null())
             break;
         dist += 2;
         reps += mem->previous->previous->hash == head->hash;
@@ -437,57 +473,75 @@ std::string Board::fen() const
     return ss.str();
 }
 
-void Board::set_fen(const std::string& fen)
+bool Board::set_fen(const std::string& fen)
 {
     clear();
 
     std::istringstream ss(fen);
     std::string section;
-    ss >> section;
+    if (!(ss >> section))
+        return false;
 
     // Piece placement
-    Square sq = SQ_A8;
+    int rank = BOARD_LEN - 1, file = 0;
     for (char c : section) {
-        if (c >= '1' && c <= '8') {
-            sq = sq_move(sq, EAST, c - '0');
-        } else if (c == '/') {
-            assert(sq % 8 == 0);
-            sq = sq_move(sq, SOUTH, 2);
+        if (c == '/') {
+            if (file != BOARD_LEN || rank == 0)
+                return false;
+            rank--;
+            file = 0;
+        } else if (c >= '1' && c <= '8') {
+            file += c - '0';
+            if (file > BOARD_LEN)
+                return false;
         } else {
-            place_piece(sq, fen_code_to_piece(c));
-            sq = sq_move(sq, EAST);
+            const Piece piece = fen_code_to_piece(c);
+            if (!is_piece(piece) || file >= BOARD_LEN)
+                return false;
+            place_piece(square_of(rank, file), piece);
+            file++;
         }
     }
+    if (rank != 0 || file != BOARD_LEN)
+        return false;
 
     // Side to move
-    ss >> section;
-    assert(section == "w" || section == "b");
+    if (!(ss >> section) || (section != "w" && section != "b"))
+        return false;
     side_to_move = section == "w" ? WHITE : BLACK;
 
     // Castling rights
-    ss >> section;
+    if (!(ss >> section))
+        return false;
     for (char c : section) {
+        CastlingRights cr;
         if (c == 'K')
-            head->castling_rights += CASTLING_W_KINGSIDE;
+            cr = CASTLING_W_KINGSIDE;
         else if (c == 'Q')
-            head->castling_rights += CASTLING_W_QUEENSIDE;
+            cr = CASTLING_W_QUEENSIDE;
         else if (c == 'k')
-            head->castling_rights += CASTLING_B_KINGSIDE;
+            cr = CASTLING_B_KINGSIDE;
         else if (c == 'q')
-            head->castling_rights += CASTLING_B_QUEENSIDE;
+            cr = CASTLING_B_QUEENSIDE;
+        else if (c == '-')
+            continue;
         else
-            assert(c == '-');
+            return false;
+
+        // Check rook and king are in place
+        const Colour colour = cr & CASTLING_W ? WHITE : BLACK;
+        if (at(square_wrt(colour, SQ_E1)) == colour * KING && at(rook_castle_from(cr)) == colour * ROOK)
+            head->castling_rights += cr;
     }
 
     // EP rights
-    ss >> section;
-    assert(section == "-" || section.size() == 2);
+    if (!(ss >> section))
+        return false;
     if (section != "-") {
-        assert(section[0] >= 'a' && section[0] <= 'h');
-        assert(section[1] == '3' || section[1] == '6');
-        assert(implies(section[1] == '3', side() == BLACK));
-        assert(implies(section[1] == '6', side() == WHITE));
-        head->ep_rights = file_to_ep(section[0] - 'a');
+        if (section.size() != 2 || section[0] < 'a' || section[0] > 'h' || section[1] != (side() == WHITE ? '6' : '3'))
+            return false;
+        if (can_capture_ep(*this, side(), square_of(section[1] - '1', section[0] - 'a')))
+            head->ep_rights = file_to_ep(section[0] - 'a');
     }
 
     // Fifty move counter
@@ -495,14 +549,21 @@ void Board::set_fen(const std::string& fen)
         head->fifty_move_counter = 0;
 
     // Fullmove counter
-    if (!(ss >> fullmove_counter))
+    if (!(ss >> fullmove_counter) || fullmove_counter == 0)
         fullmove_counter = 1;
+
+    // The transients need a king of each colour.
+    if (pop_count(occ(W_KING)) != 1 || pop_count(occ(B_KING)) != 1)
+        return false;
 
     recalculate_transients();
 
+    if (head->ep_rights != NO_EP_RIGHTS && !has_legal_ep_capture())
+        head->ep_rights = NO_EP_RIGHTS;
+
     head->hash = make_full_hash();
 
-    assert(is_valid());
+    return is_valid();
 }
 
 bool Board::is_valid() const
@@ -574,7 +635,6 @@ void Board::clear()
     side_to_move = WHITE; // Arbitrary choice
     fullmove_counter = 0;
 
-    root = BoardMemory();
     root.move = Move::make_none();
     root.captured = NO_PIECE;
     root.castling_rights = NO_CASTLING_RIGHTS;
@@ -591,6 +651,38 @@ std::string BoardMemory::move_history_str()
     if (previous == nullptr || previous->move.is_none())
         return move.uci_notation();
     return previous->move_history_str() + " " + move.uci_notation();
+}
+
+static std::string swap_case(std::string str)
+{
+    for (char& c : str)
+        c = isupper(c) ? tolower(c) : toupper(c);
+    return str;
+}
+
+std::string Board::mirrored_fen() const
+{
+    std::istringstream in(fen());
+    std::string placement, side, castling, ep, halfmove, fullmove;
+    in >> placement >> side >> castling >> ep >> halfmove >> fullmove;
+
+    std::string ranks[BOARD_LEN], rank;
+    std::istringstream placement_in(placement);
+    for (int i = BOARD_LEN - 1; i >= 0 && std::getline(placement_in, rank, '/'); i--)
+        ranks[i] = swap_case(rank);
+
+    std::string mirrored;
+    for (int i = 0; i < BOARD_LEN; i++)
+        mirrored += ranks[i] + (i + 1 < BOARD_LEN ? "/" : "");
+
+    if (ep != "-")
+        ep[1] = ep[1] == '3' ? '6' : '3';
+    if (castling != "-") {
+        castling = swap_case(castling);
+        std::sort(castling.begin(), castling.end()); // Upper case first, as FEN requires.
+    }
+
+    return mirrored + " " + (side == "w" ? "b" : "w") + " " + castling + " " + ep + " " + halfmove + " " + fullmove;
 }
 
 std::string Board::as_image_str() const

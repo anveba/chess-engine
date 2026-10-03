@@ -33,16 +33,77 @@ std::string Move::uci_notation() const
     return ss.str();
 }
 
+std::string Move::san_notation(Board& board) const
+{
+    assert(is_legal(board));
+
+    const Board& b = board;
+
+    std::string san;
+    const Piece piece = b.at(from_sq());
+    const bool capture = is_ep() || (is_piece(b.at(to_sq())) && !is_castle());
+    const std::string to_str = { char('a' + file_of(to_sq())), char('1' + rank_of(to_sq())) };
+
+    if (is_castle()) {
+        san = file_of(to_sq()) == file_of(SQ_H1) ? "O-O" : "O-O-O";
+    } else if (type_of(piece) == PAWN) {
+        if (capture)
+            san += std::string(1, char('a' + file_of(from_sq()))) + "x";
+        san += to_str;
+        if (is_promotion())
+            san += std::string("=") + to_fen_code(WHITE * promotion_to());
+    } else {
+        san += to_fen_code(WHITE * type_of(piece));
+
+        // Check for ambiguity
+        MoveList moves;
+        moves.generate<ALL_LEGAL_MOVES>(board);
+        bool ambiguous = false, same_file = false, same_rank = false;
+        for (Move m : moves) {
+            if (m.to_sq() != to_sq() || m.from_sq() == from_sq() || b.at(m.from_sq()) != piece || m.is_castle())
+                continue;
+            ambiguous = true;
+            same_file |= file_of(m.from_sq()) == file_of(from_sq());
+            same_rank |= rank_of(m.from_sq()) == rank_of(from_sq());
+        }
+
+        // Clear the ambiguity
+        if (ambiguous && (!same_file || same_rank))
+            san += char('a' + file_of(from_sq()));
+        if (ambiguous && same_file)
+            san += char('1' + rank_of(from_sq()));
+
+        if (capture)
+            san += "x";
+        san += to_str;
+    }
+
+    BoardMemory memory;
+    board.make_move(*this, memory);
+    if (board.checkers()) {
+        MoveList replies;
+        replies.generate<ALL_LEGAL_MOVES>(board);
+        san += replies.size() == 0 ? "#" : "+";
+    }
+    board.unmake_move();
+
+    return san;
+}
+
 Move Move::from_alg_notation(const Board& board, const std::string& notation)
 {
     const Colour c = board.side();
 
     // Check for castle moves
-    if (notation == "O-O" || notation == "0-0")
-        return Move::make_castle(square_wrt(c, SQ_E5), square_wrt(c, SQ_A1));
+    std::string stripped = notation;
+    for (char ch : { '+', '#' })
+        stripped.erase(std::remove(stripped.begin(), stripped.end(), ch), stripped.end());
 
-    if (notation == "O-O-O" || notation == "0-0-0")
-        return Move::make_castle(square_wrt(c, SQ_E5), square_wrt(c, SQ_H1));
+    if (stripped == "O-O" || stripped == "0-0")
+        return Move::make_castle(square_wrt(c, SQ_E1), square_wrt(c, SQ_H1));
+
+    if (stripped == "O-O-O" || stripped == "0-0-0")
+        return Move::make_castle(square_wrt(c, SQ_E1), square_wrt(c, SQ_A1));
 
     Square from_sq = SQ_NONE, to_sq = SQ_NONE;
     MoveType type = NORMAL_MOVE;
@@ -64,16 +125,14 @@ Move Move::from_alg_notation(const Board& board, const std::string& notation)
         // Get the file and/or rank of the moved piece that make the move unambiguous (if they are given).
         // A negative value means none was given.
         int from_file = -1, from_rank = -1;
-        for (size_t i : { 0, 1 }) {
-            if (n.size() == 4 + i) {
-                char d = n[1 + i];
-                if (d >= 'a' && d <= 'h')
-                    from_file = d - 'a';
-                else if (d >= '1' && d <= '8')
-                    from_rank = d - '1';
-                else
-                    assert(0);
-            }
+        for (size_t i = 1; i + 2 < n.size(); i++) {
+            char d = n[i];
+            if (d >= 'a' && d <= 'h')
+                from_file = d - 'a';
+            else if (d >= '1' && d <= '8')
+                from_rank = d - '1';
+            else
+                assert(0);
         }
 
         Piece piece = type_of(fen_code_to_piece(n[0])) * c;
@@ -99,7 +158,7 @@ Move Move::from_alg_notation(const Board& board, const std::string& notation)
             MoveList moves;
             moves.generate<ALL_LEGAL_MOVES>(board);
             for (Move m : moves) {
-                if (piece == board.at(m.from_sq()) && to_sq == m.to_sq()) {
+                if (m.from_sq() == sq && to_sq == m.to_sq() && !m.is_castle()) {
                     from_sq = m.from_sq();
                     break;
                 }

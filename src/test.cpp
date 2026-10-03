@@ -18,7 +18,7 @@ class TestResultReceiver : public ISearchReceiver
     void receive_search_result(const SearchResult& result) override
     {
         if (result.type() == BEST_RESULT)
-            best_move = result.pv().first();
+            best_move = result.pv().len() > 0 ? result.pv().first() : Move::make_none();
     }
 
     inline Move move() const { return best_move; }
@@ -31,16 +31,11 @@ Tester::Tester()
 {
 }
 
-void Tester::start_test(const TestSuite& suite, SearchMaster& searcher, uint64_t ms_per_pos)
+size_t Tester::start_test(const TestSuite& suite, SearchMaster& searcher, const SearchConditions& conditions)
 {
-    assert(ms_per_pos > 0);
-
     Board board;
 
     TestResultReceiver res;
-
-    SearchConditions conditions;
-    conditions.move_time = ms_per_pos;
 
     size_t success_count = 0;
 
@@ -55,6 +50,8 @@ void Tester::start_test(const TestSuite& suite, SearchMaster& searcher, uint64_t
         log_sync("fen     " + p.fen() + "\n");
 
         board.set_fen(p.fen());
+        searcher.ttable.clear();
+        searcher.clear_history();
 
         // Run the test
         searcher.go(res, board, conditions);
@@ -62,22 +59,15 @@ void Tester::start_test(const TestSuite& suite, SearchMaster& searcher, uint64_t
 
         std::ostringstream out;
 
-        bool success = p.best_moves().empty() ? true : false;
+        const bool success = p.is_solved_by(res.move());
 
-        // Check success
         out << "best    ";
-        for (Move m : p.best_moves()) {
-            if (res.move() == m)
-                success = true;
+        for (Move m : p.best_moves())
             out << m.uci_notation() << " ";
-        }
 
         out << "\navoid   ";
-        for (Move m : p.avoid_moves()) {
-            if (res.move() == m)
-                success = false;
+        for (Move m : p.avoid_moves())
             out << m.uci_notation() << " ";
-        }
 
         out << "\n";
 
@@ -91,6 +81,7 @@ void Tester::start_test(const TestSuite& suite, SearchMaster& searcher, uint64_t
     }
 
     log_sync("total   " + std::to_string(success_count) + "/" + std::to_string(suite.size()) + "\n");
+    return success_count;
 }
 
 bool is_opcode(const std::string& token)

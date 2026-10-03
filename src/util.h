@@ -6,6 +6,10 @@
 void log_sync(const std::string& str);
 void log_error_sync(const std::string& str);
 
+// Copies all engine input and output to a file. An empty path disables it.
+void set_debug_log(const std::string& path);
+void debug_log_input(const std::string& line);
+
 constexpr bool implies(bool a, bool b)
 {
     return !a || b;

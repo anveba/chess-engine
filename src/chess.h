@@ -112,7 +112,7 @@ constexpr Square square_wrt(Colour c, Square sq)
 // 'inverse' rank is returned for black.
 constexpr int rank_wrt(Colour c, int rank)
 {
-    return c == WHITE ? c : (BOARD_LEN - rank - 1);
+    return c == WHITE ? rank : (BOARD_LEN - rank - 1);
 }
 
 constexpr Direction direction_between(Square from, Square to)
@@ -127,6 +127,17 @@ constexpr Direction direction_between(Square from, Square to)
     else if (file_of(to) < file_of(from))
         dir = Direction(dir + WEST);
     return dir;
+}
+
+// Distance to the nearest of the four center squares.
+constexpr int center_distance(Square sq)
+{
+    return std::max(3 - file_of(sq), file_of(sq) - 4) + std::max(3 - rank_of(sq), rank_of(sq) - 4);
+}
+
+constexpr int manhattan_distance(Square a, Square b)
+{
+    return std::abs(file_of(a) - file_of(b)) + std::abs(rank_of(a) - rank_of(b));
 }
 
 enum PieceType : uint8_t
@@ -253,6 +264,7 @@ class Move
 
     constexpr Square from_sq() const { return value & 63; }
     constexpr Square to_sq() const { return (value & (63 << 6)) >> 6; }
+    constexpr uint16_t from_to_index() const { return value & 4095; }
 
     constexpr MoveType type() const { return MoveType(value & EP_MOVE); }
     constexpr bool is_normal() const { return type() == NORMAL_MOVE; }
@@ -273,6 +285,7 @@ class Move
     constexpr uint16_t encoding() const { return value; }
 
     std::string uci_notation() const;
+    std::string san_notation(Board& board) const;
 
   private:
     constexpr Move(uint16_t value)

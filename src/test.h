@@ -1,6 +1,7 @@
 #ifndef TEST_H_INCLUDED
 #define TEST_H_INCLUDED
 
+#include <algorithm>
 #include <vector>
 
 #include "search.h"
@@ -28,6 +29,11 @@ class TestPosition
     inline const std::string& comment() const { return c0; }
     inline const std::vector<Move>& best_moves() const { return bests; }
     inline const std::vector<Move>& avoid_moves() const { return avoids; }
+    inline bool is_solved_by(Move move) const
+    {
+        return (bests.empty() || std::find(bests.begin(), bests.end(), move) != bests.end()) &&
+               std::find(avoids.begin(), avoids.end(), move) == avoids.end();
+    }
 
   private:
     std::string test_name, fen_str, c0;
@@ -64,7 +70,8 @@ class Tester
   public:
     Tester();
 
-    void start_test(const TestSuite& suite, SearchMaster& searcher, uint64_t ms_per_pos);
+    // Returns the number of positions passed.
+    size_t start_test(const TestSuite& suite, SearchMaster& searcher, const SearchConditions& conditions);
 
   private:
 };

@@ -1,6 +1,7 @@
 #include "cinstance.h"
 
 #include <cassert>
+#include <csignal>
 #include <cstring>
 #include <iostream>
 #include <poll.h>
@@ -9,6 +10,7 @@
 #include <wait.h>
 
 #include "board.h"
+#include "movegen.h"
 
 static void pipe_with_check(int* pipe_ends)
 {
@@ -33,6 +35,9 @@ ChessInstance::ChessInstance(const std::string& name, const std::string& executa
     , buffer_end(sizeof(read_buffer))
 {
     assert(!name.empty());
+
+    // Writing to an engine that has exited must not kill this program.
+    signal(SIGPIPE, SIG_IGN);
 
     int stdin_pipe[2], stdout_pipe[2];
     pipe_with_check(stdin_pipe);
@@ -96,7 +101,10 @@ void ChessInstance::set_board(const std::string& fen, const std::vector<Move>& m
 bool ChessInstance::wait_for_ready()
 {
     write_to("isready\n");
-    while (read_token() != "readyok") {
+    std::string token;
+    while ((token = read_token()) != "readyok") {
+        if (token.empty())
+            return false;
     }
     return true;
 }
@@ -112,6 +120,16 @@ void ChessInstance::start_search()
     is_searching = true;
 }
 
+static bool parse_int(const std::string& str, int& out)
+{
+    try {
+        out = std::stoi(str);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 void ChessInstance::get_search_result(const Board& board, InstanceMoveResponse& result)
 {
     if (!is_searching) {
@@ -121,32 +139,48 @@ void ChessInstance::get_search_result(const Board& board, InstanceMoveResponse& 
     write_to("stop\n");
     is_searching = false;
 
+    result.move = Move::make_none();
     result.evaluation = 0;
     result.mate_in = false;
     result.depth = -1;
 
-    std::string token;
-    while ((token = read_token()) != "bestmove") {
+    std::string token = read_token();
+    while (token != "bestmove") {
 
-        if (token == "score") {
-            std::string score_type = read_token();
-            result.evaluation = std::stoi(read_token());
-            if (score_type == "mate") {
-                result.mate_in = true;
-            } else if (score_type == "cp") {
+        // The engine has exited.
+        if (token.empty())
+            return;
+
+        std::string next = read_token();
+        int value;
+        if (token == "depth" && parse_int(next, value)) {
+            result.depth = value;
+            next = read_token();
+        } else if (token == "score" && (next == "cp" || next == "mate")) {
+            const std::string number = read_token();
+            if (parse_int(number, value)) {
+                result.evaluation = value;
+                result.mate_in = next == "mate";
+                next = read_token();
             } else {
-                std::cerr << "Unknown score type";
+                next = number;
             }
-        } else if (token == "depth") {
-            result.depth = std::stoi(read_token());
         }
+        token = next;
     }
-    result.move = Move::from_uci_notation(board, read_token());
+
+    // Check move is legal
+    const std::string move = read_token();
+    MoveList legal_moves;
+    legal_moves.generate<ALL_LEGAL_MOVES>(board);
+    for (Move legal : legal_moves)
+        if (legal.uci_notation() == move)
+            result.move = legal;
 }
 
 static bool is_delimiter(char c)
 {
-    return c == ' ' || c == '\n';
+    return c == ' ' || c == '\n' || c == '\r' || c == '\t';
 }
 
 static size_t first_non_delimiter(const char* str, size_t start, size_t end)
@@ -179,7 +213,14 @@ std::string ChessInstance::read_token()
         } else {
             result += std::string(read_buffer + buffer_start, buffer_end - buffer_start);
             buffer_start = 0;
-            buffer_end = read(fd_out, read_buffer, sizeof(read_buffer));
+            const ssize_t bytes = read(fd_out, read_buffer, sizeof(read_buffer));
+
+            // The engine has exited
+            if (bytes <= 0) {
+                buffer_end = 0;
+                return "";
+            }
+            buffer_end = bytes;
         }
     }
     assert(first_delimiter(result.c_str(), 0, strlen(result.c_str())) == result.size());
