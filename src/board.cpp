@@ -91,57 +91,7 @@ void Board::make_move(Move move, BoardMemory& memory)
 
     head->hash ^= castling_rights_key[head->previous->castling_rights];
 
-    if (move.is_promotion()) {
-        memory.captured = at(move.to_sq());
-
-        remove_piece(move.from_sq());
-        remove_piece(move.to_sq());
-        place_piece(move.to_sq(), move.promotion_to() * side());
-
-        head->castling_rights -= relevant_castle[move.to_sq()];
-
-        memory.fifty_move_counter = 0;
-
-        head->hash ^= piece_sq_key[PAWN * side()][move.from_sq()];
-        head->hash ^= piece_sq_key[memory.captured][move.to_sq()];
-        head->hash ^= piece_sq_key[move.promotion_to() * side()][move.to_sq()];
-
-    } else if (move.is_castle()) {
-        memory.captured = NO_PIECE;
-        bool queen_side = move.from_sq() > move.to_sq();
-
-        Square king_to = square_wrt(side(), queen_side ? SQ_C1 : SQ_G1);
-        Square rook_to = square_wrt(side(), queen_side ? SQ_D1 : SQ_F1);
-
-        remove_piece(move.from_sq());
-        remove_piece(move.to_sq());
-        place_piece(king_to, KING * side());
-        place_piece(rook_to, ROOK * side());
-
-        head->castling_rights -= relevant_castle[move.from_sq()];
-
-        memory.fifty_move_counter++;
-
-        head->hash ^= piece_sq_key[KING * side()][move.from_sq()];
-        head->hash ^= piece_sq_key[KING * side()][king_to];
-        head->hash ^= piece_sq_key[ROOK * side()][move.to_sq()];
-        head->hash ^= piece_sq_key[ROOK * side()][rook_to];
-
-    } else if (move.is_ep()) {
-        Piece moved_piece = at(move.from_sq());
-        memory.captured = PAWN * ~side();
-
-        move_piece(move.from_sq(), move.to_sq());
-        Square captured_pawn_sq = sq_move(move.to_sq(), side() == WHITE ? SOUTH : NORTH);
-        remove_piece(captured_pawn_sq);
-
-        memory.fifty_move_counter = 0;
-
-        head->hash ^= piece_sq_key[moved_piece][move.from_sq()];
-        head->hash ^= piece_sq_key[memory.captured][captured_pawn_sq];
-        head->hash ^= piece_sq_key[moved_piece][move.to_sq()];
-
-    } else {
+    if (move.is_normal()) {
         Piece moved_piece = at(move.from_sq());
         memory.captured = move_piece(move.from_sq(), move.to_sq());
 
@@ -159,6 +109,55 @@ void Board::make_move(Move move, BoardMemory& memory)
 
         head->hash ^= piece_sq_key[moved_piece][move.from_sq()];
         head->hash ^= piece_sq_key[memory.captured][move.to_sq()];
+        head->hash ^= piece_sq_key[moved_piece][move.to_sq()];
+
+    } else if (move.is_castle()) {
+        memory.captured = NO_PIECE;
+
+        Square king_to = move.king_castle_to();
+        Square rook_to = move.rook_castle_to();
+
+        remove_piece(move.from_sq());
+        remove_piece(move.to_sq());
+        place_piece(king_to, KING * side());
+        place_piece(rook_to, ROOK * side());
+
+        head->castling_rights -= relevant_castle[move.from_sq()];
+
+        memory.fifty_move_counter++;
+
+        head->hash ^= piece_sq_key[KING * side()][move.from_sq()];
+        head->hash ^= piece_sq_key[KING * side()][king_to];
+        head->hash ^= piece_sq_key[ROOK * side()][move.to_sq()];
+        head->hash ^= piece_sq_key[ROOK * side()][rook_to];
+
+    } else if (move.is_promotion()) {
+        memory.captured = at(move.to_sq());
+
+        remove_piece(move.from_sq());
+        remove_piece(move.to_sq());
+        place_piece(move.to_sq(), move.promotion_to() * side());
+
+        head->castling_rights -= relevant_castle[move.to_sq()];
+
+        memory.fifty_move_counter = 0;
+
+        head->hash ^= piece_sq_key[PAWN * side()][move.from_sq()];
+        head->hash ^= piece_sq_key[memory.captured][move.to_sq()];
+        head->hash ^= piece_sq_key[move.promotion_to() * side()][move.to_sq()];
+
+    } else { // EP
+        Piece moved_piece = at(move.from_sq());
+        memory.captured = PAWN * ~side();
+
+        move_piece(move.from_sq(), move.to_sq());
+        Square captured_pawn_sq = move.captured_ep_pawn_sq();
+        remove_piece(captured_pawn_sq);
+
+        memory.fifty_move_counter = 0;
+
+        head->hash ^= piece_sq_key[moved_piece][move.from_sq()];
+        head->hash ^= piece_sq_key[memory.captured][captured_pawn_sq];
         head->hash ^= piece_sq_key[moved_piece][move.to_sq()];
     }
 

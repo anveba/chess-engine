@@ -95,6 +95,13 @@ constexpr bool is_rank(int rank)
     return rank >= 0 && rank < BOARD_LEN;
 }
 
+constexpr Colour side_of(Square sq)
+{
+    static_assert(WHITE == 0);
+    static_assert(BLACK == 1);
+    return Colour(sq > SQ_H4);
+}
+
 constexpr Square square_of(int rank, int file)
 {
     assert(is_rank(rank) && is_file(file));
@@ -152,6 +159,7 @@ enum PieceType : uint8_t
 };
 
 constexpr uint8_t MAX_PIECE_TYPE = KING + 1;
+constexpr uint8_t VALID_PIECE_TYPE_COUNT = MAX_PIECE_TYPE - 1;
 
 enum Piece : uint8_t
 {
@@ -271,6 +279,25 @@ class Move
     constexpr bool is_ep() const { return type() == EP_MOVE; }
     constexpr bool is_castle() const { return type() == CASTLING_MOVE; }
     constexpr bool is_promotion() const { return type() == PROMOTION_MOVE; }
+
+    constexpr Square captured_ep_pawn_sq() const
+    {
+        assert(is_ep());
+        return sq_move(to_sq(), side_of(to_sq()) == WHITE ? NORTH : SOUTH);
+    }
+
+    constexpr Square king_castle_to() const
+    {
+        assert(is_castle());
+        return square_wrt(side_of(to_sq()), from_sq() > to_sq() ? SQ_C1 : SQ_G1);
+    }
+
+    constexpr Square rook_castle_to() const
+    {
+        assert(is_castle());
+        return square_wrt(side_of(to_sq()), from_sq() > to_sq() ? SQ_D1 : SQ_F1);
+    }
+
     constexpr PieceType promotion_to() const
     {
         assert(is_promotion());
