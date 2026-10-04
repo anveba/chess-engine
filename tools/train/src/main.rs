@@ -27,10 +27,11 @@ const QB: i16 = 64;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        panic!("Expected path to data");
+    if args.len() < 3 {
+        panic!("Expected path to data and output");
     }
     let data_path = &args[1];
+    let out_path = &args[2];
 
     let mut trainer = ValueTrainerBuilder::default()
         // makes `ntm_inputs` available below
@@ -84,9 +85,9 @@ fn main() {
     };
 
     let settings = LocalSettings {
-        threads: 16,
+        threads: 4,
         test_set: None,
-        output_directory: "checkpoints",
+        output_directory: out_path,
         batch_queue_size: 64,
     };
 
@@ -95,7 +96,7 @@ fn main() {
         use loader::viribinpack::{Filter, ViriBinpackLoader, ViriFilter};
 
         let buffer_size_mb = 1024;
-        let threads = 16;
+        let threads = 4;
 
         // The `viriformat` crate exposes a useful `Filter` of its own, but you can also
         // use a custom function like for SF binpacks with `ViriFilter::custom(function)`
