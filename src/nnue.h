@@ -9,7 +9,7 @@
 class Board;
 
 constexpr size_t NNUE_FEATURE_COUNT = 2 * SQ_MAX * VALID_PIECE_TYPE_COUNT;
-constexpr size_t NNUE_HIDDEN_SIZE = 128;
+constexpr size_t NNUE_HIDDEN_SIZE = 256;
 constexpr int32_t NNUE_QA = 255;
 constexpr int32_t NNUE_QB = 64;
 constexpr int32_t NNUE_SCALE = 400;
@@ -52,8 +52,6 @@ struct NNUEAccumulatorPair
     template<bool Make>
     void update_move(const NNUE& nnue, const Board& board, Move move);
 
-    mutable bool eval_is_cached[COLOUR_MAX];
-    mutable int32_t cached_eval[COLOUR_MAX];
     alignas(64) int16_t acc[NNUE_HIDDEN_SIZE * 2]; // First white then black values
 };
 

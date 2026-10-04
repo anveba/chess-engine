@@ -386,12 +386,14 @@ void UCI::start_bench(std::istringstream& in)
     }
 
     BenchResult result = run_bench(searcher, depth, true);
+    const uint64_t eval_ns = time_evaluation_ns();
 
     std::ostringstream out;
     out << "\nDepth: " << depth
         << "\nNodes searched: " << result.nodes
         << "\nTime: " << result.time_ms << " ms"
-        << "\nNodes per second: " << (result.time_ms ? result.nodes * 1000 / result.time_ms : 0) << std::endl;
+        << "\nNodes per second: " << (result.time_ms ? result.nodes * 1000 / result.time_ms : 0)
+        << "\nEvaluation time: " << eval_ns << " ns (median of " << EVAL_TIMING_RUNS << ")" << std::endl;
     log_sync(out.str());
 }
 

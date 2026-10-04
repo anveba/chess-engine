@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#define EMBEDDED_NET "nnue/gen1.nnue"
+#define EMBEDDED_NET "nnue/gen2.nnue"
 
 asm(".section .rodata\n"
     ".balign 64\n"
@@ -63,9 +63,6 @@ void NNUEAccumulatorPair::update_feature(const NNUE& nnue, Square sq, Piece piec
 // https://chessprogramming.org/NNUE
 int32_t NNUEAccumulatorPair::evaluate(const NNUE& nnue, Colour perspective) const
 {
-    if (eval_is_cached[perspective])
-        return cached_eval[perspective];
-
     const int16_t* our_acc = perspective == WHITE ? acc : acc + NNUE_HIDDEN_SIZE;
     const int16_t* their_acc = perspective == WHITE ? acc + NNUE_HIDDEN_SIZE : acc;
 
@@ -80,9 +77,6 @@ int32_t NNUEAccumulatorPair::evaluate(const NNUE& nnue, Colour perspective) cons
 
     eval *= NNUE_SCALE;
     eval /= NNUE_QA * NNUE_QB;
-
-    eval_is_cached[perspective] = true;
-    cached_eval[perspective] = eval;
 
     return eval;
 }
@@ -108,7 +102,6 @@ void NNUEAccumulatorPair::set(const NNUE& nnue, const Board& board)
     update_piece<B_QUEEN>(nnue, board);
     update_piece<B_KING>(nnue, board);
 
-    eval_is_cached[0] = eval_is_cached[1] = false;
 }
 
 void NNUEAccumulatorPair::make_move(const NNUE& nnue, const Board& board, Move move)
@@ -154,7 +147,6 @@ void NNUEAccumulatorPair::update_move(const NNUE& nnue, const Board& board, Move
         update_feature<!Make>(nnue, move.captured_ep_pawn_sq(), ~board.side() * PAWN);
         update_feature<Make>(nnue, move.to_sq(), board.side() * PAWN);
     }
-    eval_is_cached[0] = eval_is_cached[1] = false;
 }
 
 template<Piece P>

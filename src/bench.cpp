@@ -1,9 +1,16 @@
 #include "bench.h"
 
+#include <algorithm>
+#include <chrono>
+#include <deque>
 #include <string>
+#include <vector>
 
+#include "eval.h"
 #include "timestrat.h"
 #include "util.h"
+
+constexpr int EVALS_PER_RUN = 1000;
 
 // clang-format off
 static const char* const BENCH_FENS[] = {
@@ -76,4 +83,27 @@ BenchResult run_bench(SearchMaster& searcher, int depth, bool verbose)
     }
     total.time_ms = now() - start;
     return total;
+}
+
+uint64_t time_evaluation_ns()
+{
+    std::deque<Board> boards(std::size(BENCH_FENS));
+    for (size_t i = 0; i < boards.size(); i++)
+        boards[i].set_fen(BENCH_FENS[i]);
+
+    volatile int sink = 0;
+    double total_ns = 0;
+    for (Board& board : boards) {
+        std::vector<double> run_ns;
+        for (int run = 0; run < EVAL_TIMING_RUNS; run++) {
+            const auto start = std::chrono::steady_clock::now();
+            for (int i = 0; i < EVALS_PER_RUN; i++)
+                sink = sink + evaluate(board);
+            const std::chrono::duration<double, std::nano> elapsed = std::chrono::steady_clock::now() - start;
+            run_ns.push_back(elapsed.count() / EVALS_PER_RUN);
+        }
+        std::nth_element(run_ns.begin(), run_ns.begin() + run_ns.size() / 2, run_ns.end());
+        total_ns += run_ns[run_ns.size() / 2];
+    }
+    return uint64_t(total_ns);
 }
