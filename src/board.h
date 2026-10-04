@@ -5,6 +5,7 @@
 
 #include "bitboard.h"
 #include "chess.h"
+#include "nnue.h"
 
 #define START_FEN "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
@@ -91,6 +92,8 @@ class Board
     std::string as_image_str() const;
     std::string move_history_str() const { return head->move_history_str(); }
 
+    const NNUEAccumulatorPair& nnue_accumulator() const { return nnue_acc; };
+
   private:
     void clear();
     inline Piece& at(Square sq) { return board[sq]; }
@@ -113,6 +116,8 @@ class Board
     Bitboard piece_occupancy[MAX_PIECE];
 
     BoardMemory root, *head;
+
+    NNUEAccumulatorPair nnue_acc;
 };
 
 inline bool Board::is_loud(Move move) const

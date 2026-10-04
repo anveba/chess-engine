@@ -1,7 +1,11 @@
 #ifndef NNUE_H_INCLUDED
 #define NNUE_H_INCLUDED
 
-#include "board.h"
+#include "chess.h"
+
+class Board;
+
+const std::string DEFAULT_NETWORK = "nnue/gen1.nnue";
 
 constexpr size_t NNUE_FEATURE_COUNT = 2 * SQ_MAX * VALID_PIECE_TYPE_COUNT;
 constexpr size_t NNUE_HIDDEN_SIZE = 128;
@@ -14,12 +18,12 @@ struct NNUEAccumulatorPair;
 struct NNUE
 {
   public:
-    static NNUE load(std::string path, bool& success);
+    static bool load(std::string path, NNUE& result);
 
   private:
     friend NNUEAccumulatorPair;
 
-    int16_t feature_weights[NNUE_FEATURE_COUNT];
+    int16_t feature_weights[NNUE_FEATURE_COUNT][NNUE_HIDDEN_SIZE];
     int16_t accumulator_bias[NNUE_HIDDEN_SIZE];
     int16_t output_weights[NNUE_HIDDEN_SIZE * 2];
     int16_t output_bias;
@@ -28,21 +32,25 @@ struct NNUE
 struct NNUEAccumulatorPair
 {
   public:
-    int16_t evaluate(const NNUE& nnue, Colour perspective);
+    int32_t evaluate(const NNUE& nnue, Colour perspective) const;
     void set(const NNUE& nnue, const Board& board);
-    template<Colour Perspective>
-    void update(const NNUE& nnue, const Board& board, Move move);
+    void make_move(const NNUE& nnue, const Board& board, Move move);
+    void unmake_move(const NNUE& nnue, const Board& board, Move move);
 
   private:
     template<Piece P>
     void update_piece(const NNUE& nnue, const Board& board);
-    template<Colour Perspective>
-    void add_feature(const NNUE& nnue, Square sq, Piece piece);
-    template<Colour Perspective>
-    void sub_feature(const NNUE& nnue, Square sq, Piece piece);
+    template<bool Add>
+    void update_feature(const NNUE& nnue, Square sq, Piece piece);
+    template<bool Make>
+    void update_move(const NNUE& nnue, const Board& board, Move move);
 
-    bool dirty;
-    int16_t acc[NNUE_HIDDEN_SIZE * 2]; // First white then black values
+    mutable bool eval_is_cached[COLOUR_MAX];
+    mutable int32_t cached_eval[COLOUR_MAX];
+    alignas(64) int16_t acc[NNUE_HIDDEN_SIZE * 2]; // First white then black values
 };
+
+void set_nnue(const NNUE& nnue);
+const NNUE& get_nnue();
 
 #endif

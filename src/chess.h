@@ -108,11 +108,16 @@ constexpr Square square_of(int rank, int file)
     return rank * BOARD_LEN + file;
 }
 
+constexpr Square flip_square(Square sq)
+{
+    return Square(sq ^ 56);
+}
+
 // Returns the relative square. The same square is returned for white, but
 // corresponding square on the other side of the board is returned for black.
 constexpr Square square_wrt(Colour c, Square sq)
 {
-    return Square(sq ^ (c * 56));
+    return c == WHITE ? sq : flip_square(sq);
 }
 
 // Returns the relative rank. The same rank is returned for white and the

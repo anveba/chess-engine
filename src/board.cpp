@@ -89,6 +89,8 @@ void Board::make_move(Move move, BoardMemory& memory)
     head = &memory;
     memory.move = move;
 
+    nnue_acc.make_move(get_nnue(), *this, move);
+
     head->hash ^= castling_rights_key[head->previous->castling_rights];
 
     if (move.is_normal()) {
@@ -226,6 +228,8 @@ void Board::unmake_move()
     } else {
         unmove_piece(move.from_sq(), move.to_sq(), head->captured);
     }
+
+    nnue_acc.unmake_move(get_nnue(), *this, move);
 
     head = head->previous;
 
@@ -561,6 +565,8 @@ bool Board::set_fen(const std::string& fen)
         head->ep_rights = NO_EP_RIGHTS;
 
     head->hash = make_full_hash();
+
+    nnue_acc.set(get_nnue(), *this);
 
     return is_valid();
 }

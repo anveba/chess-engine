@@ -1,16 +1,30 @@
 #include "nnue.h"
 
+#include "board.h"
+
 #include <cstring>
 #include <fstream>
 #include <vector>
 
+static NNUE nnue;
+
+void set_nnue(const NNUE& new_nnue)
+{
+    nnue = new_nnue;
+}
+
+const NNUE& get_nnue()
+{
+    return nnue;
+}
+
 template<Colour Perspective>
 static constexpr int acc_index(Square sq, Piece piece)
 {
-    sq = square_wrt(BLACK, sq);
     static_assert(WHITE == 0);
     static_assert(BLACK == 1);
     const Colour side = Colour(uint8_t(Perspective) ^ uint8_t(colour_of(piece)));
+    sq = square_wrt(Perspective, sq);
     static_assert(NO_PIECE_TYPE == 0);
     return side * SQ_MAX * VALID_PIECE_TYPE_COUNT + (type_of(piece) - 1) * SQ_MAX + sq;
 }
@@ -21,29 +35,32 @@ static constexpr int32_t screlu(int16_t val)
     return c * c;
 }
 
-template<Colour Perspective>
-void NNUEAccumulatorPair::add_feature(const NNUE& nnue, Square sq, Piece piece)
+template<bool Add>
+void NNUEAccumulatorPair::update_feature(const NNUE& nnue, Square sq, Piece piece)
 {
-    size_t offset = Perspective == WHITE ? 0 : NNUE_HIDDEN_SIZE;
-    for (size_t i = offset; i < NNUE_HIDDEN_SIZE + offset; i++) {
-        acc[i] += nnue.feature_weights[acc_index<Perspective>(sq, piece)];
-    }
-}
-
-template<Colour Perspective>
-void NNUEAccumulatorPair::sub_feature(const NNUE& nnue, Square sq, Piece piece)
-{
-    size_t offset = Perspective == WHITE ? 0 : NNUE_HIDDEN_SIZE;
-    for (size_t i = offset; i < NNUE_HIDDEN_SIZE + offset; i++) {
-        acc[i] -= nnue.feature_weights[acc_index<Perspective>(sq, piece)];
+    int iw = acc_index<WHITE>(sq, piece);
+    int ib = acc_index<BLACK>(sq, piece);
+    for (size_t i = 0; i < NNUE_HIDDEN_SIZE; i++) {
+        int16_t vw = nnue.feature_weights[iw][i];
+        int16_t vb = nnue.feature_weights[ib][i];
+        if (Add) {
+            acc[i] += vw;
+            acc[i + NNUE_HIDDEN_SIZE] += vb;
+        } else {
+            acc[i] -= vw;
+            acc[i + NNUE_HIDDEN_SIZE] -= vb;
+        }
     }
 }
 
 // https://chessprogramming.org/NNUE
-int16_t NNUEAccumulatorPair::evaluate(const NNUE& nnue, Colour perspective)
+int32_t NNUEAccumulatorPair::evaluate(const NNUE& nnue, Colour perspective) const
 {
-    int16_t* our_acc = perspective == WHITE ? acc : acc + NNUE_HIDDEN_SIZE;
-    int16_t* their_acc = perspective == WHITE ? acc + NNUE_HIDDEN_SIZE : acc;
+    if (eval_is_cached[perspective])
+        return cached_eval[perspective];
+
+    const int16_t* our_acc = perspective == WHITE ? acc : acc + NNUE_HIDDEN_SIZE;
+    const int16_t* their_acc = perspective == WHITE ? acc + NNUE_HIDDEN_SIZE : acc;
 
     int32_t eval = 0;
     for (size_t i = 0; i < NNUE_HIDDEN_SIZE; i++) {
@@ -57,12 +74,18 @@ int16_t NNUEAccumulatorPair::evaluate(const NNUE& nnue, Colour perspective)
     eval *= NNUE_SCALE;
     eval /= NNUE_QA * NNUE_QB;
 
+    eval_is_cached[perspective] = true;
+    cached_eval[perspective] = eval;
+
     return eval;
 }
 
 void NNUEAccumulatorPair::set(const NNUE& nnue, const Board& board)
 {
-    std::memset(acc, 0, sizeof(acc));
+    for (size_t i = 0; i < NNUE_HIDDEN_SIZE; i++) {
+        acc[i] = nnue.accumulator_bias[i];
+        acc[i + NNUE_HIDDEN_SIZE] = nnue.accumulator_bias[i];
+    }
 
     update_piece<W_PAWN>(nnue, board);
     update_piece<W_ROOK>(nnue, board);
@@ -77,78 +100,83 @@ void NNUEAccumulatorPair::set(const NNUE& nnue, const Board& board)
     update_piece<B_BISHOP>(nnue, board);
     update_piece<B_QUEEN>(nnue, board);
     update_piece<B_KING>(nnue, board);
+
+    eval_is_cached[0] = eval_is_cached[1] = false;
 }
 
-template<Colour Perspective>
-void NNUEAccumulatorPair::update(const NNUE& nnue, const Board& board, Move move)
+void NNUEAccumulatorPair::make_move(const NNUE& nnue, const Board& board, Move move)
 {
-    assert(Perspective == board.side());
+    update_move<true>(nnue, board, move);
+}
+
+void NNUEAccumulatorPair::unmake_move(const NNUE& nnue, const Board& board, Move move)
+{
+    update_move<false>(nnue, board, move);
+}
+
+template<bool Make>
+void NNUEAccumulatorPair::update_move(const NNUE& nnue, const Board& board, Move move)
+{
     assert(move.is_proper());
 
     if (move.is_normal()) {
         Piece from_piece = board.at(move.from_sq());
-        sub_feature<Perspective>(nnue, move.from_sq(), from_piece);
+        update_feature<!Make>(nnue, move.from_sq(), from_piece);
 
         Piece to_piece = board.at(move.to_sq());
         if (is_piece(to_piece))
-            sub_feature<Perspective>(nnue, move.to_sq(), to_piece);
-        add_feature<Perspective>(nnue, move.to_sq(), from_piece);
+            update_feature<!Make>(nnue, move.to_sq(), to_piece);
+        update_feature<Make>(nnue, move.to_sq(), from_piece);
 
     } else if (move.is_castle()) {
-        sub_feature<Perspective>(nnue, move.from_sq(), Perspective * KING);
-        sub_feature<Perspective>(nnue, move.to_sq(), Perspective * ROOK);
-        add_feature<Perspective>(nnue, move.king_castle_to(), Perspective * KING);
-        add_feature<Perspective>(nnue, move.rook_castle_to(), Perspective * ROOK);
+        update_feature<!Make>(nnue, move.from_sq(), board.side() * KING);
+        update_feature<!Make>(nnue, move.to_sq(), board.side() * ROOK);
+        update_feature<Make>(nnue, move.king_castle_to(), board.side() * KING);
+        update_feature<Make>(nnue, move.rook_castle_to(), board.side() * ROOK);
 
     } else if (move.is_promotion()) {
-        sub_feature<Perspective>(nnue, move.from_sq(), Perspective * PAWN);
-        add_feature<Perspective>(nnue, move.to_sq(), Perspective * move.promotion_to());
+        update_feature<!Make>(nnue, move.from_sq(), board.side() * PAWN);
+        update_feature<Make>(nnue, move.to_sq(), board.side() * move.promotion_to());
+        Piece to_piece = board.at(move.to_sq());
+        if (is_piece(to_piece))
+            update_feature<!Make>(nnue, move.to_sq(), to_piece);
 
-    } else if (move.is_ep()) {
-        sub_feature<Perspective>(nnue, move.from_sq(), Perspective * PAWN);
-        sub_feature<Perspective>(nnue, move.captured_ep_pawn_sq(), ~Perspective * PAWN);
-        add_feature<Perspective>(nnue, move.to_sq(), Perspective * PAWN);
+    } else { // EP
+        assert(move.is_ep());
+        update_feature<!Make>(nnue, move.from_sq(), board.side() * PAWN);
+        update_feature<!Make>(nnue, move.captured_ep_pawn_sq(), ~board.side() * PAWN);
+        update_feature<Make>(nnue, move.to_sq(), board.side() * PAWN);
     }
+    eval_is_cached[0] = eval_is_cached[1] = false;
 }
 
 template<Piece P>
 void NNUEAccumulatorPair::update_piece(const NNUE& nnue, const Board& board)
 {
-    constexpr Colour Perspective = colour_of(P);
     Bitboard occ = board.occ(P);
     while (occ) {
         Square sq = pop_lsb(occ);
-        add_feature<Perspective>(nnue, sq, P);
+        update_feature<true>(nnue, sq, P);
     }
 }
 
-constexpr
-
-    NNUE
-    NNUE::load(std::string path, bool& success)
+bool NNUE::load(std::string path, NNUE& result)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
-    NNUE result;
 
-    if (!file) {
-        success = false;
-        return result;
-    }
+    if (!file)
+        return false;
 
     const std::streamsize size = file.tellg();
-    if (size < sizeof(NNUE)) {
-        success = false;
-        return result;
-    }
+    if (size < std::streamsize(sizeof(NNUE)))
+        return false;
 
     file.seekg(0, std::ios::beg);
 
-    std::vector<char> raw(static_cast<std::size_t>(size));
+    std::vector<unsigned char> raw(static_cast<std::size_t>(size));
 
-    if (!file.read(raw.data(), size)) {
-        success = false;
-        return result;
-    }
+    if (!file.read((char*)raw.data(), size))
+        return false;
 
     std::vector<int16_t> values;
     values.reserve(raw.size() / 2);
@@ -165,13 +193,12 @@ constexpr
 
     size_t next = 0;
     memcpy(result.feature_weights, values.data() + next, sizeof(result.feature_weights));
-    next += sizeof(result.feature_weights);
+    next += sizeof(result.feature_weights) / sizeof(int16_t);
     memcpy(result.accumulator_bias, values.data() + next, sizeof(result.accumulator_bias));
-    next += sizeof(result.accumulator_bias);
+    next += sizeof(result.accumulator_bias) / sizeof(int16_t);
     memcpy(result.output_weights, values.data() + next, sizeof(result.output_weights));
-    next += sizeof(result.output_weights);
+    next += sizeof(result.output_weights) / sizeof(int16_t);
     memcpy(&result.output_bias, values.data() + next, sizeof(result.output_bias));
 
-    success = true;
-    return result;
+    return true;
 }

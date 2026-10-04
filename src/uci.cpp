@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "bench.h"
+#include "eval.h"
 #include "moveorder.h"
 #include "perft.h"
 #include "test.h"
@@ -42,6 +43,18 @@ UCI::UCI()
     UCIOption log_option("Debug Log File", STRING_OPTION, "");
     log_option.set_on_change_callback([&](UCIOption* opt) { set_debug_log(opt->get_string()); });
     options.push_back(log_option);
+
+#if !TRADITIONAL_EVAL
+    UCIOption nnue_option("EvalFile", STRING_OPTION, DEFAULT_NETWORK);
+    nnue_option.set_on_change_callback([&](UCIOption* opt) {
+        NNUE nnue;
+        if (NNUE::load(opt->get_string(), nnue))
+            set_nnue(nnue);
+        else
+            log_sync("Failed to set NNUE");
+    });
+    options.push_back(nnue_option);
+#endif
 }
 
 void UCI::start()

@@ -27,34 +27,28 @@ TEST(eval_is_colour_symmetric)
     CHECK(count > 0); // check we actually tested something
 }
 
-TEST(eval_trace_matches_evaluate)
-{
-    Board board;
-    for (const char* fen : { START_FEN, "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
-                             "8/8/3k4/8/8/8/2R5/4K3 w - - 0 1", "8/8/3kr3/8/8/8/2B5/2R1K3 w - - 0 1" }) {
-        board.set_fen(fen);
-        const std::string trace = eval_trace(board);
-        const std::string marker = "Final (side to move): ";
-        const size_t pos = trace.find(marker);
-        CHECK(pos != std::string::npos);
-        if (pos != std::string::npos)
-            CHECK_EQ_CTX(std::stoi(trace.substr(pos + marker.size())), int(evaluate(board)), fen);
-    }
-}
-
 TEST(eval_basic_sanity)
 {
+    constexpr BoardEval BALANCED = 200;
+    constexpr BoardEval PIECE_UP = 300;
+
     Board board;
+    board.set_fen(START_FEN);
+    CHECK(std::abs(evaluate(board)) < BALANCED);
 
-    // An extra queen
-    board.set_fen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1");
-    CHECK(evaluate(board) > 500);
-    board.set_fen("4k3/8/8/8/8/8/8/3QK3 b - - 0 1");
-    CHECK(evaluate(board) < -500);
+    // White is a piece up
+    for (const char* fen : { "r1bqk1nr/pppp1ppp/8/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+                             "2bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQk - 4 4",
+                             "r1b1k1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+                             "8/5pk1/6p1/8/8/6P1/5PK1/3R4 w - - 0 1" }) {
+        board.set_fen(fen);
+        CHECK_CTX(evaluate(board) > PIECE_UP, fen);
 
-    // King and bishop against king, scaled to a draw
-    board.set_fen("4k3/8/8/8/8/8/8/2B1K3 w - - 0 1");
-    CHECK(evaluate(board) < 100);
+        std::string black_to_move = fen;
+        black_to_move[black_to_move.find(" w ") + 1] = 'b';
+        board.set_fen(black_to_move);
+        CHECK_CTX(evaluate(board) < -PIECE_UP, black_to_move);
+    }
 }
 
 static Move legal_move(const Board& board, const std::string& uci)

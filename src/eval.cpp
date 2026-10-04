@@ -7,6 +7,8 @@
 
 #include "piecetables.h"
 
+#if TRADITIONAL_EVAL
+
 struct BoardScores
 {
     int mg, eg;
@@ -14,10 +16,22 @@ struct BoardScores
 
 static_assert(sizeof(int) >= 4);
 
-static constexpr BoardScores operator+(BoardScores a, BoardScores b) { return { a.mg + b.mg, a.eg + b.eg }; }
-static constexpr BoardScores operator-(BoardScores a, BoardScores b) { return { a.mg - b.mg, a.eg - b.eg }; }
-static constexpr BoardScores operator*(int n, BoardScores s) { return { n * s.mg, n * s.eg }; }
-static constexpr BoardScores& operator+=(BoardScores& a, BoardScores b) { return a = a + b; }
+static constexpr BoardScores operator+(BoardScores a, BoardScores b)
+{
+    return { a.mg + b.mg, a.eg + b.eg };
+}
+static constexpr BoardScores operator-(BoardScores a, BoardScores b)
+{
+    return { a.mg - b.mg, a.eg - b.eg };
+}
+static constexpr BoardScores operator*(int n, BoardScores s)
+{
+    return { n * s.mg, n * s.eg };
+}
+static constexpr BoardScores& operator+=(BoardScores& a, BoardScores b)
+{
+    return a = a + b;
+}
 
 // Tapered eval: https://www.chessprogramming.org/Tapered_Eval
 static constexpr int PHASE_WEIGHT[] = { 0, 0, 2, 1, 1, 4, 0 };
@@ -75,7 +89,13 @@ static constexpr BoardScores QUEEN_MOBILITY[] = {
 // clang-format on
 
 static constexpr const BoardScores* MOBILITY_BY_PIECE[MAX_PIECE_TYPE] = {
-    nullptr, nullptr, ROOK_MOBILITY, KNIGHT_MOBILITY, BISHOP_MOBILITY, QUEEN_MOBILITY, nullptr
+    nullptr,
+    nullptr,
+    ROOK_MOBILITY,
+    KNIGHT_MOBILITY,
+    BISHOP_MOBILITY,
+    QUEEN_MOBILITY,
+    nullptr
 };
 
 static_assert(std::size(PHASE_WEIGHT) == MAX_PIECE_TYPE);
@@ -130,8 +150,7 @@ static constexpr BoardScores piece_square(PieceType p, Square sq)
 }
 
 template<Colour Side, PieceType P>
-static void evaluate_pieces(const Board& board, Bitboard movable_to, Bitboard enemy_king_zone, int& king_attackers,
-                            int& king_attack_weight, Terms& t)
+static void evaluate_pieces(const Board& board, Bitboard movable_to, Bitboard enemy_king_zone, int& king_attackers, int& king_attack_weight, Terms& t)
 {
     const Bitboard own_pawns = board.occ(Side * PAWN);
     const Bitboard enemy_pawns = board.occ(~Side * PAWN);
@@ -172,7 +191,7 @@ static void evaluate_pawns(const Board& board, Terms& t)
         // Check isolated pawns
         if (!(own_pawns & bb_adjacent_files(file)))
             t.term[PAWN_STRUCTURE] += ISOLATED_PAWN;
-        
+
         // Only the rearmost of doubled pawns is penalised. It cannot be a passed pawn.
         if (own_pawns & front)
             t.term[PAWN_STRUCTURE] += DOUBLED_PAWN;
@@ -290,18 +309,28 @@ static int scale_if_likely_draw(const Board& board, int eval)
     return eval;
 }
 
+#endif
+
 BoardEval evaluate(const Board& board)
 {
+#if TRADITIONAL_EVAL
     const BoardScores score = evaluate_side<WHITE>(board).total() - evaluate_side<BLACK>(board).total();
     int blended_score = blend_by_game_phase(score, game_phase(board));
     int mopped_up_score = mop_up(board, blended_score);
     const int eval = scale_if_likely_draw(board, mopped_up_score);
 
     return BoardEval((board.side() == WHITE ? eval : -eval) + TEMPO);
+#else
+    constexpr int32_t MAX_NNUE_EVAL = MATE_EVAL - 512;
+    int32_t eval = board.nnue_accumulator().evaluate(get_nnue(), board.side());
+    return eval > MAX_NNUE_EVAL ? MAX_NNUE_EVAL : (eval < -MAX_NNUE_EVAL ? -MAX_NNUE_EVAL : eval);
+#endif
 }
 
 std::string eval_trace(const Board& board)
 {
+#if TRADITIONAL_EVAL
+
     const Terms white = evaluate_side<WHITE>(board), black = evaluate_side<BLACK>(board);
     const int phase = game_phase(board);
 
@@ -329,6 +358,12 @@ std::string eval_trace(const Board& board)
         << "Blended by phase (white): " << blended_score << "\n"
         << "Adjusting for mopping up (white): " << mopped_up_score - blended_score << "\n"
         << "Adjusting for likely draws (white): " << adjusted - mopped_up_score << "\n"
+        << "Tempo: " << TEMPO << "\n"
         << "Final (side to move): " << evaluate(board) << "\n";
     return out.str();
+#else
+    std::ostringstream out;
+    out << "NNUE evaluation (side to move): " << evaluate(board) << "\n";
+    return out.str();
+#endif
 }

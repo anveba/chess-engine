@@ -3,6 +3,9 @@
 
 #include "board.h"
 #include "movegen.h"
+#include "nnue.h"
+
+#define TRADITIONAL_EVAL 0
 
 using BoardEval = int16_t;
 
