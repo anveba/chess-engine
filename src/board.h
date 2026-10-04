@@ -23,6 +23,7 @@ class BoardMemory
 
     void operator>>(BoardMemory& to);
     std::string move_history_str();
+    void make_accumulator_valid() const;
 
     Piece captured;
     Move move;
@@ -37,6 +38,11 @@ class BoardMemory
     Bitboard checkers;
 
     BoardMemory* previous;
+
+    UpdatedPiece updated_pieces[NNUE_MAX_UPDATED_PIECE];
+
+    mutable bool acc_is_valid;
+    mutable NNUEAccumulatorPair nnue_acc;
 };
 
 class Board
@@ -92,7 +98,7 @@ class Board
     std::string as_image_str() const;
     std::string move_history_str() const { return head->move_history_str(); }
 
-    const NNUEAccumulatorPair& nnue_accumulator() const { return nnue_acc; };
+    const NNUEAccumulatorPair& get_nnue_accumulator() const;
 
   private:
     void clear();
@@ -116,8 +122,6 @@ class Board
     Bitboard piece_occupancy[MAX_PIECE];
 
     BoardMemory root, *head;
-
-    NNUEAccumulatorPair nnue_acc;
 };
 
 inline bool Board::is_loud(Move move) const

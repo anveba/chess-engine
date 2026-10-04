@@ -13,8 +13,16 @@ constexpr size_t NNUE_HIDDEN_SIZE = 256;
 constexpr int32_t NNUE_QA = 255;
 constexpr int32_t NNUE_QB = 64;
 constexpr int32_t NNUE_SCALE = 400;
+constexpr int NNUE_MAX_UPDATED_PIECE = 3;
 
 struct NNUEAccumulatorPair;
+
+struct UpdatedPiece
+{
+    Piece piece;
+    Square from;
+    Square to;
+};
 
 struct NNUE
 {
@@ -25,10 +33,10 @@ struct NNUE
   private:
     friend NNUEAccumulatorPair;
 
-    int16_t feature_weights[NNUE_FEATURE_COUNT][NNUE_HIDDEN_SIZE];
-    int16_t accumulator_bias[NNUE_HIDDEN_SIZE];
-    int16_t output_weights[NNUE_HIDDEN_SIZE * 2];
-    int16_t output_bias;
+    alignas(32) int16_t feature_weights[NNUE_FEATURE_COUNT][NNUE_HIDDEN_SIZE];
+    alignas(32) int16_t accumulator_bias[NNUE_HIDDEN_SIZE];
+    alignas(32) int16_t output_weights[NNUE_HIDDEN_SIZE * 2];
+    alignas(32) int16_t output_bias;
 };
 
 struct NNUEAccumulatorPair
@@ -36,8 +44,7 @@ struct NNUEAccumulatorPair
   public:
     int32_t evaluate(const NNUE& nnue, Colour perspective) const;
     void set(const NNUE& nnue, const Board& board);
-    void make_move(const NNUE& nnue, const Board& board, Move move);
-    void unmake_move(const NNUE& nnue, const Board& board, Move move);
+    void update(const NNUE& nnue, const NNUEAccumulatorPair& parent, const UpdatedPiece (&updated)[NNUE_MAX_UPDATED_PIECE]);
 
     bool operator==(const NNUEAccumulatorPair& other) const
     {
@@ -49,10 +56,10 @@ struct NNUEAccumulatorPair
     void update_piece(const NNUE& nnue, const Board& board);
     template<bool Add>
     void update_feature(const NNUE& nnue, Square sq, Piece piece);
-    template<bool Make>
-    void update_move(const NNUE& nnue, const Board& board, Move move);
+    template<Colour Side>
+    void update_by_side(const NNUE& nnue, const NNUEAccumulatorPair& parent, const UpdatedPiece (&updated)[NNUE_MAX_UPDATED_PIECE]);
 
-    alignas(64) int16_t acc[NNUE_HIDDEN_SIZE * 2]; // First white then black values
+    alignas(32) int16_t acc[NNUE_HIDDEN_SIZE * 2]; // First white then black values
 };
 
 const NNUE& get_nnue();

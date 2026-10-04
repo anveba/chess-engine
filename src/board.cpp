@@ -56,6 +56,7 @@ void BoardMemory::operator>>(BoardMemory& to)
     to.ep_rights = NO_EP_RIGHTS;
     to.fifty_move_counter = fifty_move_counter;
     to.hash = hash ^ ep_rights_key[ep_rights];
+    to.acc_is_valid = false;
 
     to.previous = this;
 }
@@ -89,8 +90,6 @@ void Board::make_move(Move move, BoardMemory& memory)
     head = &memory;
     memory.move = move;
 
-    nnue_acc.make_move(get_nnue(), *this, move);
-
     head->hash ^= castling_rights_key[head->previous->castling_rights];
 
     if (move.is_normal()) {
@@ -113,6 +112,10 @@ void Board::make_move(Move move, BoardMemory& memory)
         head->hash ^= piece_sq_key[memory.captured][move.to_sq()];
         head->hash ^= piece_sq_key[moved_piece][move.to_sq()];
 
+        head->updated_pieces[0] = { moved_piece, move.from_sq(), move.to_sq() };
+        head->updated_pieces[1] = { memory.captured, move.to_sq(), SQ_NONE };
+        head->updated_pieces[2].piece = NO_PIECE;
+
     } else if (move.is_castle()) {
         memory.captured = NO_PIECE;
 
@@ -133,6 +136,10 @@ void Board::make_move(Move move, BoardMemory& memory)
         head->hash ^= piece_sq_key[ROOK * side()][move.to_sq()];
         head->hash ^= piece_sq_key[ROOK * side()][rook_to];
 
+        head->updated_pieces[0] = { KING * side(), move.from_sq(), king_to };
+        head->updated_pieces[1] = { ROOK * side(), move.to_sq(), rook_to };
+        head->updated_pieces[2].piece = NO_PIECE;
+
     } else if (move.is_promotion()) {
         memory.captured = at(move.to_sq());
 
@@ -148,6 +155,10 @@ void Board::make_move(Move move, BoardMemory& memory)
         head->hash ^= piece_sq_key[memory.captured][move.to_sq()];
         head->hash ^= piece_sq_key[move.promotion_to() * side()][move.to_sq()];
 
+        head->updated_pieces[0] = { PAWN * side(), move.from_sq(), SQ_NONE };
+        head->updated_pieces[1] = { move.promotion_to() * side(), SQ_NONE, move.to_sq() };
+        head->updated_pieces[2] = { memory.captured, move.to_sq(), SQ_NONE };
+
     } else { // EP
         Piece moved_piece = at(move.from_sq());
         memory.captured = PAWN * ~side();
@@ -161,6 +172,10 @@ void Board::make_move(Move move, BoardMemory& memory)
         head->hash ^= piece_sq_key[moved_piece][move.from_sq()];
         head->hash ^= piece_sq_key[memory.captured][captured_pawn_sq];
         head->hash ^= piece_sq_key[moved_piece][move.to_sq()];
+
+        head->updated_pieces[0] = { moved_piece, move.from_sq(), move.to_sq() };
+        head->updated_pieces[1] = { memory.captured, captured_pawn_sq, SQ_NONE };
+        head->updated_pieces[2].piece = NO_PIECE;
     }
 
     // Increment fullmove counter when black has moved
@@ -228,8 +243,6 @@ void Board::unmake_move()
     } else {
         unmove_piece(move.from_sq(), move.to_sq(), head->captured);
     }
-
-    nnue_acc.unmake_move(get_nnue(), *this, move);
 
     head = head->previous;
 
@@ -326,6 +339,8 @@ void Board::make_null_move(BoardMemory& memory)
 
     side_to_move = ~side_to_move;
     head->hash ^= black_to_move_key;
+
+    head->updated_pieces[0].piece = NO_PIECE;
 
     recalculate_transients();
 
@@ -566,7 +581,8 @@ bool Board::set_fen(const std::string& fen)
 
     head->hash = make_full_hash();
 
-    nnue_acc.set(get_nnue(), *this);
+    head->nnue_acc.set(get_nnue(), *this);
+    head->acc_is_valid = true;
 
     return is_valid();
 }
@@ -710,4 +726,19 @@ std::string Board::as_image_str() const
     ss << "Hash: " << head->hash;
 
     return ss.str();
+}
+
+void BoardMemory::make_accumulator_valid() const
+{
+    if (acc_is_valid)
+        return;
+    previous->make_accumulator_valid();
+    nnue_acc.update(get_nnue(), previous->nnue_acc, updated_pieces);
+    acc_is_valid = true;
+}
+
+const NNUEAccumulatorPair& Board::get_nnue_accumulator() const
+{
+    head->make_accumulator_valid();
+    return head->nnue_acc;
 }

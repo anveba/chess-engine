@@ -3,6 +3,7 @@
 #include "board.h"
 
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 #define EMBEDDED_NET "nnue/gen2.nnue"
@@ -101,52 +102,6 @@ void NNUEAccumulatorPair::set(const NNUE& nnue, const Board& board)
     update_piece<B_BISHOP>(nnue, board);
     update_piece<B_QUEEN>(nnue, board);
     update_piece<B_KING>(nnue, board);
-
-}
-
-void NNUEAccumulatorPair::make_move(const NNUE& nnue, const Board& board, Move move)
-{
-    update_move<true>(nnue, board, move);
-}
-
-void NNUEAccumulatorPair::unmake_move(const NNUE& nnue, const Board& board, Move move)
-{
-    update_move<false>(nnue, board, move);
-}
-
-template<bool Make>
-void NNUEAccumulatorPair::update_move(const NNUE& nnue, const Board& board, Move move)
-{
-    assert(move.is_proper());
-
-    if (move.is_normal()) {
-        Piece from_piece = board.at(move.from_sq());
-        update_feature<!Make>(nnue, move.from_sq(), from_piece);
-
-        Piece to_piece = board.at(move.to_sq());
-        if (is_piece(to_piece))
-            update_feature<!Make>(nnue, move.to_sq(), to_piece);
-        update_feature<Make>(nnue, move.to_sq(), from_piece);
-
-    } else if (move.is_castle()) {
-        update_feature<!Make>(nnue, move.from_sq(), board.side() * KING);
-        update_feature<!Make>(nnue, move.to_sq(), board.side() * ROOK);
-        update_feature<Make>(nnue, move.king_castle_to(), board.side() * KING);
-        update_feature<Make>(nnue, move.rook_castle_to(), board.side() * ROOK);
-
-    } else if (move.is_promotion()) {
-        update_feature<!Make>(nnue, move.from_sq(), board.side() * PAWN);
-        update_feature<Make>(nnue, move.to_sq(), board.side() * move.promotion_to());
-        Piece to_piece = board.at(move.to_sq());
-        if (is_piece(to_piece))
-            update_feature<!Make>(nnue, move.to_sq(), to_piece);
-
-    } else { // EP
-        assert(move.is_ep());
-        update_feature<!Make>(nnue, move.from_sq(), board.side() * PAWN);
-        update_feature<!Make>(nnue, move.captured_ep_pawn_sq(), ~board.side() * PAWN);
-        update_feature<Make>(nnue, move.to_sq(), board.side() * PAWN);
-    }
 }
 
 template<Piece P>
@@ -184,10 +139,57 @@ const NNUE& NNUE::embedded()
     static const NNUE net = [] {
         NNUE n;
         if (!load_from_bytes(embedded_net, embedded_net_end - embedded_net, n)) {
-            std::cerr << "The embedded network has the wrong size for this architecture" << std::endl;
+            std::cerr << "The embedded NNUE network has the wrong size" << std::endl;
             std::abort();
         }
         return n;
     }();
     return net;
+}
+
+template<int Adds, int Subs>
+static void fused_update(const int16_t* __restrict__ parent, int16_t* __restrict__ child, const int16_t* __restrict__ const (&add_rows)[2], const int16_t* __restrict__ const (&sub_rows)[2])
+{
+    for (size_t i = 0; i < NNUE_HIDDEN_SIZE; i++) {
+        int16_t value = parent[i];
+        for (int a = 0; a < Adds; a++)
+            value += add_rows[a][i];
+        for (int s = 0; s < Subs; s++)
+            value -= sub_rows[s][i];
+        child[i] = value;
+    }
+}
+
+template<Colour Side>
+void NNUEAccumulatorPair::update_by_side(const NNUE& nnue, const NNUEAccumulatorPair& parent, const UpdatedPiece (&updated)[NNUE_MAX_UPDATED_PIECE])
+{
+    const int16_t* __restrict__ add_rows[2] = {};
+    const int16_t* __restrict__ sub_rows[2] = {};
+    int adds = 0, subs = 0;
+    for (int p = 0; p < NNUE_MAX_UPDATED_PIECE && is_piece(updated[p].piece); p++) {
+        if (updated[p].from != SQ_NONE)
+            sub_rows[subs++] = nnue.feature_weights[acc_index<Side>(updated[p].from, updated[p].piece)];
+        if (updated[p].to != SQ_NONE)
+            add_rows[adds++] = nnue.feature_weights[acc_index<Side>(updated[p].to, updated[p].piece)];
+    }
+
+    constexpr size_t Offset = Side == WHITE ? 0 : NNUE_HIDDEN_SIZE;
+    const int16_t* __restrict__ from = parent.acc + Offset;
+    int16_t* __restrict__ to = acc + Offset;
+    if (adds == 1 && subs == 1)
+        fused_update<1, 1>(from, to, add_rows, sub_rows);
+    else if (adds == 1 && subs == 2)
+        fused_update<1, 2>(from, to, add_rows, sub_rows);
+    else if (adds == 2 && subs == 2)
+        fused_update<2, 2>(from, to, add_rows, sub_rows);
+    else { // null move
+        assert(adds == 0 && subs == 0);
+        std::memcpy((char*)to, (char*)from, NNUE_HIDDEN_SIZE * sizeof(int16_t));
+    }
+}
+
+void NNUEAccumulatorPair::update(const NNUE& nnue, const NNUEAccumulatorPair& parent, const UpdatedPiece (&updated)[NNUE_MAX_UPDATED_PIECE])
+{
+    update_by_side<WHITE>(nnue, parent, updated);
+    update_by_side<BLACK>(nnue, parent, updated);
 }

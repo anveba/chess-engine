@@ -322,7 +322,7 @@ BoardEval evaluate(const Board& board)
     return BoardEval((board.side() == WHITE ? eval : -eval) + TEMPO);
 #else
     constexpr int32_t MAX_NNUE_EVAL = MATE_EVAL - 512;
-    int32_t eval = board.nnue_accumulator().evaluate(get_nnue(), board.side());
+    int32_t eval = board.get_nnue_accumulator().evaluate(get_nnue(), board.side());
     return eval > MAX_NNUE_EVAL ? MAX_NNUE_EVAL : (eval < -MAX_NNUE_EVAL ? -MAX_NNUE_EVAL : eval);
 #endif
 }
