@@ -2,7 +2,6 @@
 #include <fstream>
 
 #include "board.h"
-#include "eval.h"
 #include "testing.h"
 
 #ifndef TEST_DATA_DIR
@@ -19,14 +18,6 @@ int main(int argc, char** argv)
     precompute_bitboards();
     precompute_board_constants();
 
-#if !TRADITIONAL_EVAL
-    NNUE nnue;
-    if (!NNUE::load(DEFAULT_NETWORK, nnue)) {
-        std::cerr << "Cannot load " << DEFAULT_NETWORK << std::endl;
-        return 1;
-    }
-    set_nnue(nnue);
-#endif
 
     const std::string filter = argc > 1 ? argv[1] : "";
     int run = 0, failed = 0;

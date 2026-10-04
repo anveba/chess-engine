@@ -14,6 +14,7 @@ BIN_PATH := bin
 
 SRC := $(wildcard src/*.cpp)
 HEADERS := $(wildcard src/*.h)
+NETS := $(wildcard nnue/*.nnue)
 TEST_SRC := $(wildcard tests/unit/*.cpp)
 TEST_HEADERS := $(wildcard tests/unit/*.h)
 
@@ -30,29 +31,29 @@ tsan: $(BIN_PATH)/chess-tsan        # ThreadSanitizer.
 $(BIN_PATH):
 	@mkdir -p $(BIN_PATH)
 
-$(BIN_PATH)/chess: $(SRC) $(HEADERS) | $(BIN_PATH)
+$(BIN_PATH)/chess: $(SRC) $(HEADERS) $(NETS) | $(BIN_PATH)
 	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(RELEASE_FLAGS)
 
-$(BIN_PATH)/chess-debug: $(SRC) $(HEADERS) | $(BIN_PATH)
+$(BIN_PATH)/chess-debug: $(SRC) $(HEADERS) $(NETS) | $(BIN_PATH)
 	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(DEBUG_FLAGS)
 
-$(BIN_PATH)/chess-profile: $(SRC) $(HEADERS) | $(BIN_PATH)
+$(BIN_PATH)/chess-profile: $(SRC) $(HEADERS) $(NETS) | $(BIN_PATH)
 	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(PROFILE_FLAGS)
 
-$(BIN_PATH)/chess-stats: $(SRC) $(HEADERS) | $(BIN_PATH)
+$(BIN_PATH)/chess-stats: $(SRC) $(HEADERS) $(NETS) | $(BIN_PATH)
 	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(STATS_FLAGS)
 
-$(BIN_PATH)/chess-asan: $(SRC) $(HEADERS) | $(BIN_PATH)
+$(BIN_PATH)/chess-asan: $(SRC) $(HEADERS) $(NETS) | $(BIN_PATH)
 	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(SANITIZE_FLAGS)
 
-$(BIN_PATH)/chess-tsan: $(SRC) $(HEADERS) | $(BIN_PATH)
+$(BIN_PATH)/chess-tsan: $(SRC) $(HEADERS) $(NETS) | $(BIN_PATH)
 	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(TSAN_FLAGS)
 
 # Unit tests are built with asserts on.
-$(BIN_PATH)/tests: $(SRC) $(HEADERS) $(TEST_SRC) $(TEST_HEADERS) | $(BIN_PATH)
+$(BIN_PATH)/tests: $(SRC) $(HEADERS) $(NETS) $(TEST_SRC) $(TEST_HEADERS) | $(BIN_PATH)
 	$(CC) -o $@ $(SRC) $(TEST_SRC) $(FLAGS) $(INCLUDE) $(TEST_FLAGS)
 
-$(BIN_PATH)/tests-asan: $(SRC) $(HEADERS) $(TEST_SRC) $(TEST_HEADERS) | $(BIN_PATH)
+$(BIN_PATH)/tests-asan: $(SRC) $(HEADERS) $(NETS) $(TEST_SRC) $(TEST_HEADERS) | $(BIN_PATH)
 	$(CC) -o $@ $(SRC) $(TEST_SRC) $(FLAGS) $(INCLUDE) $(TEST_FLAGS) $(SANITIZE_FLAGS)
 
 .PHONY: test test-unit test-uci test-sanitize test-tsan test-all

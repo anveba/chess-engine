@@ -2,16 +2,23 @@
 
 #include "board.h"
 
-#include <cstring>
-#include <fstream>
-#include <vector>
+#include <cstdlib>
+#include <iostream>
 
-static NNUE nnue;
+#define EMBEDDED_NET "nnue/gen1.nnue"
 
-void set_nnue(const NNUE& new_nnue)
-{
-    nnue = new_nnue;
-}
+asm(".section .rodata\n"
+    ".balign 64\n"
+    ".global embedded_net\n"
+    "embedded_net: .incbin \"" EMBEDDED_NET "\"\n"
+    ".global embedded_net_end\n"
+    "embedded_net_end:\n"
+    ".previous");
+extern "C" const unsigned char embedded_net[], embedded_net_end[];
+
+constexpr size_t NNUE_FILE_SIZE = (sizeof(NNUE) + 63) / 64 * 64;
+
+static const NNUE& nnue = NNUE::embedded();
 
 const NNUE& get_nnue()
 {
@@ -160,45 +167,35 @@ void NNUEAccumulatorPair::update_piece(const NNUE& nnue, const Board& board)
     }
 }
 
-bool NNUE::load(std::string path, NNUE& result)
+// Returns the position after the values read.
+static const unsigned char* read_little_endian_int16s(const unsigned char* data, int16_t* out, size_t count)
 {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    for (size_t i = 0; i < count; i++, data += 2)
+        out[i] = int16_t(data[0] | (data[1] << 8));
+    return data;
+}
 
-    if (!file)
+bool NNUE::load_from_bytes(const unsigned char* data, size_t size, NNUE& result)
+{
+    if (size != NNUE_FILE_SIZE)
         return false;
 
-    const std::streamsize size = file.tellg();
-    if (size < std::streamsize(sizeof(NNUE)))
-        return false;
-
-    file.seekg(0, std::ios::beg);
-
-    std::vector<unsigned char> raw(static_cast<std::size_t>(size));
-
-    if (!file.read((char*)raw.data(), size))
-        return false;
-
-    std::vector<int16_t> values;
-    values.reserve(raw.size() / 2);
-
-    // Convert from little-endian
-    for (std::size_t i = 0; i + 1 < raw.size(); i += 2) {
-        uint16_t bits = static_cast<uint16_t>(raw[i]) | (static_cast<uint16_t>(raw[i + 1]) << 8);
-
-        int16_t value;
-        std::memcpy(&value, &bits, sizeof(value));
-
-        values.push_back(value);
-    }
-
-    size_t next = 0;
-    memcpy(result.feature_weights, values.data() + next, sizeof(result.feature_weights));
-    next += sizeof(result.feature_weights) / sizeof(int16_t);
-    memcpy(result.accumulator_bias, values.data() + next, sizeof(result.accumulator_bias));
-    next += sizeof(result.accumulator_bias) / sizeof(int16_t);
-    memcpy(result.output_weights, values.data() + next, sizeof(result.output_weights));
-    next += sizeof(result.output_weights) / sizeof(int16_t);
-    memcpy(&result.output_bias, values.data() + next, sizeof(result.output_bias));
-
+    data = read_little_endian_int16s(data, &result.feature_weights[0][0], NNUE_FEATURE_COUNT * NNUE_HIDDEN_SIZE);
+    data = read_little_endian_int16s(data, result.accumulator_bias, NNUE_HIDDEN_SIZE);
+    data = read_little_endian_int16s(data, result.output_weights, 2 * NNUE_HIDDEN_SIZE);
+    read_little_endian_int16s(data, &result.output_bias, 1);
     return true;
+}
+
+const NNUE& NNUE::embedded()
+{
+    static const NNUE net = [] {
+        NNUE n;
+        if (!load_from_bytes(embedded_net, embedded_net_end - embedded_net, n)) {
+            std::cerr << "The embedded network has the wrong size for this architecture" << std::endl;
+            std::abort();
+        }
+        return n;
+    }();
+    return net;
 }

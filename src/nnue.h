@@ -1,11 +1,12 @@
 #ifndef NNUE_H_INCLUDED
 #define NNUE_H_INCLUDED
 
+#include <algorithm>
+#include <iterator>
+
 #include "chess.h"
 
 class Board;
-
-const std::string DEFAULT_NETWORK = "nnue/gen1.nnue";
 
 constexpr size_t NNUE_FEATURE_COUNT = 2 * SQ_MAX * VALID_PIECE_TYPE_COUNT;
 constexpr size_t NNUE_HIDDEN_SIZE = 128;
@@ -18,7 +19,8 @@ struct NNUEAccumulatorPair;
 struct NNUE
 {
   public:
-    static bool load(std::string path, NNUE& result);
+    static bool load_from_bytes(const unsigned char* data, size_t size, NNUE& result);
+    static const NNUE& embedded();
 
   private:
     friend NNUEAccumulatorPair;
@@ -37,6 +39,11 @@ struct NNUEAccumulatorPair
     void make_move(const NNUE& nnue, const Board& board, Move move);
     void unmake_move(const NNUE& nnue, const Board& board, Move move);
 
+    bool operator==(const NNUEAccumulatorPair& other) const
+    {
+        return std::equal(std::begin(acc), std::end(acc), std::begin(other.acc));
+    }
+
   private:
     template<Piece P>
     void update_piece(const NNUE& nnue, const Board& board);
@@ -50,7 +57,6 @@ struct NNUEAccumulatorPair
     alignas(64) int16_t acc[NNUE_HIDDEN_SIZE * 2]; // First white then black values
 };
 
-void set_nnue(const NNUE& nnue);
 const NNUE& get_nnue();
 
 #endif

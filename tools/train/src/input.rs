@@ -4,8 +4,7 @@ use bullet_lib::game::inputs::SparseInputType;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Chess768;
 
-const PIECE_PERM: [usize; 7] = [
-    0, // unused
+const PIECE_PERM: [usize; 6] = [
     0, // pawn
     2, // knight
     3, // bishop

@@ -20,7 +20,9 @@ use bullet_lib::{
 use input::Chess768;
 use std::env;
 
-const HIDDEN_SIZE: usize = 128;
+const HIDDEN_SIZE: usize = 256;
+const SUPERBATCHES: usize = 30;
+const THREADS: usize = 2;
 const SCALE: i32 = 400;
 const QA: i16 = 255;
 const QB: i16 = 64;
@@ -73,19 +75,19 @@ fn main() {
             batch_size: 16_384,
             batches_per_superbatch: 6104,
             start_superbatch: 1,
-            end_superbatch: 40,
+            end_superbatch: SUPERBATCHES,
         },
-        wdl_scheduler: wdl::ConstantWDL { value: 0.75 },
-        lr_scheduler: lr::StepLR {
-            start: 0.001,
-            gamma: 0.1,
-            step: 18,
+        wdl_scheduler: wdl::ConstantWDL { value: 0.4 },
+        lr_scheduler: lr::CosineDecayLR {
+            initial_lr: 0.001,
+            final_lr: 0.001 * 0.3f32.powi(5),
+            final_superbatch: SUPERBATCHES,
         },
         save_rate: 10,
     };
 
     let settings = LocalSettings {
-        threads: 4,
+        threads: THREADS,
         test_set: None,
         output_directory: out_path,
         batch_queue_size: 64,
@@ -96,30 +98,13 @@ fn main() {
         use loader::viribinpack::{Filter, ViriBinpackLoader, ViriFilter};
 
         let buffer_size_mb = 1024;
-        let threads = 4;
+        let threads = THREADS;
 
         // The `viriformat` crate exposes a useful `Filter` of its own, but you can also
         // use a custom function like for SF binpacks with `ViriFilter::custom(function)`
         let filter = ViriFilter::Builtin(Filter::default());
 
         ViriBinpackLoader::new(data_path, buffer_size_mb, threads, filter)
-    };
-
-    // loading from a SF binpack
-    let _data_loader_sf = {
-        use loader::sfbinpack::{MoveType, PieceType, SfBinpackLoader, TrainingDataEntry};
-
-        let buffer_size_mb = 1024;
-        let threads = 16;
-        fn filter(entry: &TrainingDataEntry) -> bool {
-            entry.ply >= 16
-                && !entry.pos.is_checked(entry.pos.side_to_move())
-                && entry.score.unsigned_abs() <= 10000
-                && entry.mv.mtype() == MoveType::Normal
-                && entry.pos.piece_at(entry.mv.to()).piece_type() == PieceType::None
-        }
-
-        SfBinpackLoader::new(data_path, buffer_size_mb, threads, filter)
     };
 
     // loading directly from a `BulletFormat` file

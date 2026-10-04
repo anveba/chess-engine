@@ -16,6 +16,13 @@ static Move find_move(Board& board, const std::string& uci)
     return Move::make_none();
 }
 
+static bool accumulator_matches_refresh(const Board& board)
+{
+    Board refreshed;
+    refreshed.set_fen(board.fen());
+    return board.nnue_accumulator() == refreshed.nnue_accumulator();
+}
+
 static std::vector<std::string> playout_fens()
 {
     std::vector<std::string> fens = {
@@ -72,6 +79,7 @@ TEST(random_playouts_keep_board_consistent)
                 was_null.push_back(null_move);
 
                 CHECK_EQ_CTX(board.hash(), board.make_full_hash(), board.fen());
+                CHECK_CTX(accumulator_matches_refresh(board), board.fen());
             }
 
             while (!history.empty()) {
@@ -81,6 +89,7 @@ TEST(random_playouts_keep_board_consistent)
                     board.unmake_move();
                 CHECK_EQ(board.fen(), history.back());
                 CHECK_EQ(board.hash(), board.make_full_hash());
+                CHECK_CTX(accumulator_matches_refresh(board), board.fen());
                 history.pop_back();
                 was_null.pop_back();
             }

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <fstream>
+#include <set>
 
 #include "board.h"
 #include "eval.h"
@@ -39,7 +40,6 @@ TEST(eval_basic_sanity)
     // White is a piece up
     for (const char* fen : { "r1bqk1nr/pppp1ppp/8/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
                              "2bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQk - 4 4",
-                             "r1b1k1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
                              "8/5pk1/6p1/8/8/6P1/5PK1/3R4 w - - 0 1" }) {
         board.set_fen(fen);
         CHECK_CTX(evaluate(board) > PIECE_UP, fen);
@@ -48,6 +48,40 @@ TEST(eval_basic_sanity)
         black_to_move[black_to_move.find(" w ") + 1] = 'b';
         board.set_fen(black_to_move);
         CHECK_CTX(evaluate(board) < -PIECE_UP, black_to_move);
+    }
+}
+
+#if !TRADITIONAL_EVAL
+TEST(nnue_network_is_loaded)
+{
+    // If there is no network, everything evals to zero
+    std::ifstream in(testing::data_path("positions.txt"));
+    Board board;
+    std::set<BoardEval> evals;
+    std::string fen;
+    for (int i = 0; i < 20 && std::getline(in, fen); i++) {
+        board.set_fen(fen);
+        evals.insert(evaluate(board));
+    }
+    CHECK(evals.size() > 1);
+}
+#endif
+
+TEST(eval_ranks_material)
+{
+    // black missing nothing, a pawn, a knight, a rook, the queen.
+    const char* fens[] = { "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+                           "r1bqk1nr/1ppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+                           "r1bqk1nr/pppp1ppp/8/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+                           "2bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQk - 4 4",
+                           "r1b1k1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4" };
+    Board board;
+    BoardEval previous = -INF_EVAL;
+    for (const char* fen : fens) {
+        board.set_fen(fen);
+        const BoardEval eval = evaluate(board);
+        CHECK_CTX(eval > previous, fen);
+        previous = eval;
     }
 }
 
