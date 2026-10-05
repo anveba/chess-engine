@@ -183,6 +183,8 @@ MovePicker::MovePicker(const Board& board, MoveList& list, Move first, const Mov
     , moves(list.begin())
     , size(list.size())
     , next_loud(0)
+    , stage(PARTITION)
+    , killer_index(0)
 {
     Move* found = first.is_proper() ? std::find(moves, moves + size, first) : moves + size;
     if (found != moves + size) {
@@ -192,6 +194,7 @@ MovePicker::MovePicker(const Board& board, MoveList& list, Move first, const Mov
     }
 }
 
+// ordering from https://chessprogramming.org/Move_Ordering
 Move MovePicker::next()
 {
     switch (stage) {
@@ -202,7 +205,6 @@ Move MovePicker::next()
         case PARTITION:
             partition_by_loudness();
             stage = GOOD_LOUD;
-            [[fallthrough]];
 
         case GOOD_LOUD:
             while (next_loud < good_loud_end) {
@@ -216,7 +218,6 @@ Move MovePicker::next()
                 std::swap(scores[best], scores[good_loud_end]);
             }
             stage = KILLERS;
-            [[fallthrough]];
 
         case KILLERS:
             // Only quiet moves are searched, since a killer may be a capture here.
@@ -226,24 +227,20 @@ Move MovePicker::next()
                     return consume(next_quiet, found - moves);
             }
             stage = SCORE_QUIETS;
-            [[fallthrough]];
 
         case SCORE_QUIETS:
             score_quiets();
             stage = QUIETS;
-            [[fallthrough]];
 
         case QUIETS:
             if (next_quiet < size)
                 return consume(next_quiet, best_in(next_quiet, size));
             stage = BAD_LOUD;
-            [[fallthrough]];
 
         case BAD_LOUD:
             if (next_loud < loud_end)
                 return consume(next_loud, best_in(next_loud, loud_end));
             stage = DONE;
-            [[fallthrough]];
 
         case DONE:
             return Move::make_none();
