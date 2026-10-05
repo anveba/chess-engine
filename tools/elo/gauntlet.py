@@ -18,33 +18,27 @@ import collections
 import csv
 import datetime
 import os
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import tomllib
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common import fastchess, git, util
 
 Z_95 = 1.96
 PROGRESS_INTERVAL = 10
 ORDO_SIMULATIONS = 2000
 
+Rating = collections.namedtuple("Rating", ["rating", "error_95", "games"])
+
 HISTORY_COLUMNS = ["date", "revision", "tc", "games", "rating", "low", "high", "opponents", "pgn"]
 
 
-def time_forfeits(pgn_paths):
-    losses = collections.Counter()
-    for path in pgn_paths:
-        with open(path) as f:
-            for game in f.read().split("[Event ")[1:]:
-                tags = dict(re.findall(r'\[(\w+) "([^"]*)"\]', game))
-                if tags.get("Termination") == "time forfeit":
-                    losses[tags["Black"] if tags["Result"] == "1-0" else tags["White"]] += 1
-    return losses
-
 def rate(ordo, pgn_paths, config):
-    """Returns (rating, 95% error, games)."""
     name = config["engine"]["name"]
     opponents = config["opponent"]
     fixed = [[opp["name"], opp["rating"]] for opp in opponents if not opp.get("rating_error")]
@@ -72,34 +66,21 @@ def rate(ordo, pgn_paths, config):
 
     rating, error, games = float(row["RATING"]), float(row["ERROR"]), int(row["PLAYED"])
     print(f"\nEstimated rating: {rating:.0f} (95% interval {rating - error:.0f} to {rating + error:.0f}) from {games} games")
-    print("Time forfeits: " + (", ".join(f"{name} {n}" for name, n in time_forfeits(pgn_paths).most_common()) or "none"))
-    return rating, error, games
-
-
-def engine_args(name, cmd, options):
-    def value(v):
-        return str(v).lower() if isinstance(v, bool) else str(v)
-    return ["-engine", f"name={name}", f"cmd={cmd}", f"dir={os.path.dirname(cmd)}",
-            *[f"option.{key}={value(v)}" for key, v in options.items()]]
-
-
-def git_revision(directory):
-    def git(*args):
-        return subprocess.run(["git", *args], cwd=directory, capture_output=True, text=True).stdout.strip()
-    commit = git("rev-parse", "--short", "HEAD") or "unknown"
-    return commit + ("-dirty" if git("status", "--porcelain", "--untracked-files=no") else "")
+    print(fastchess.time_forfeits_summary(pgn_paths))
+    return Rating(rating, error, games)
 
 
 def play(cmd, out_dir, total_games):
     finished = 0
-    with open(os.path.join(out_dir, "fastchess.log"), "w") as log, \
-            subprocess.Popen(cmd, cwd=out_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as proc:
-        for line in proc.stdout:
-            log.write(line)
-            if line.startswith("Finished game"):
-                finished += 1
-                if finished % PROGRESS_INTERVAL == 0:
-                    print(f"  {finished}/{total_games} games", flush=True)
+
+    def report_progress(line):
+        nonlocal finished
+        if line.startswith("Finished game"):
+            finished += 1
+            if finished % PROGRESS_INTERVAL == 0:
+                print(f"  {finished}/{total_games} games", flush=True)
+
+    fastchess.run_in_dir_with_log(cmd, out_dir, report_progress)
 
 
 def append_history(path, row):
@@ -118,28 +99,22 @@ def run(args, config):
     concurrency = args.concurrency or match["concurrency"]
     tc = args.tc or match["tc"]
     engines_dir = os.path.abspath(args.engines_dir)
-    fastchess = os.path.abspath(args.fastchess) if os.sep in args.fastchess else args.fastchess
 
     # The engine is copied so changes don't affect it.
     source = os.path.abspath(args.engine)
-    revision = git_revision(os.path.dirname(source))
-    out_dir = os.path.join(os.path.abspath(args.output_dir), datetime.datetime.now().strftime("%Y%m%d-%H%M%S-") + revision)
-    os.makedirs(out_dir)
+    revision = git.working_tree_label_or_unknown(os.path.dirname(source))
+    out_dir = util.make_timestamped_dir(args.output_dir, revision)
     engine_cmd = os.path.join(out_dir, os.path.basename(source))
     shutil.copy2(source, engine_cmd)
     pgn_path = os.path.join(out_dir, "games.pgn")
 
-    draw, resign = match["draw"], match["resign"]
-    cmd = [fastchess, "-tournament", "gauntlet",
-           *engine_args(engine["name"], engine_cmd, engine.get("options", {}))]
-    for opp in config["opponent"]:
-        cmd += engine_args(opp["name"], os.path.join(engines_dir, opp["cmd"]), opp.get("options", {}))
-    cmd += ["-each", f"tc={tc}", f"timemargin={match['timemargin']}", f"option.Hash={match['hash']}",
-            "-games", "2", "-rounds", str(games // 2), "-repeat", "-recover", "-srand", str(int(time.time())),
-            "-openings", f"file={os.path.join(config['dir'], match['openings'])}", "format=epd", "order=random",
-            "-concurrency", str(concurrency), "-pgnout", f"file={pgn_path}",
-            "-draw", f"movenumber={draw['movenumber']}", f"movecount={draw['movecount']}", f"score={draw['score']}",
-            "-resign", f"movecount={resign['movecount']}", f"score={resign['score']}"]
+    engines = [fastchess.Engine(engine["name"], engine_cmd, engine.get("options", {}))]
+    engines += [fastchess.Engine(opp["name"], os.path.join(engines_dir, opp["cmd"]), opp.get("options", {}))
+                for opp in config["opponent"]]
+    cmd = fastchess.command(
+        engines, tournament="gauntlet", tc=tc, time_margin=match["timemargin"], hash_mb=match["hash"],
+        openings=os.path.join(config["dir"], match["openings"]), games=games, concurrency=concurrency,
+        seed=int(time.time()), pgn_out=pgn_path, draw=match["draw"], resign=match["resign"], fastchess=args.fastchess)
 
     total = games * len(config["opponent"])
     print(f"Playing {total} games at {tc} with concurrency {concurrency}. Output in {out_dir}")

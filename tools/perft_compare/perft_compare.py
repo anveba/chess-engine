@@ -53,8 +53,7 @@ class Engine:
                 return line
         sys.exit(f"{self.name} exited while waiting for '{prefix}'")
 
-    def perft(self, fen, depth):
-        """Returns (nodes, seconds)."""
+    def perft_nodes_and_seconds(self, fen, depth):
         self.send(f"position fen {fen}")
         self.send("isready")
         self.read_until("readyok")
@@ -95,7 +94,7 @@ def main():
     for label, fen, depth in POSITIONS:
         nps, nodes_by_engine = {}, {}
         for engine in engines:
-            runs = [engine.perft(fen, depth) for _ in range(args.runs)]
+            runs = [engine.perft_nodes_and_seconds(fen, depth) for _ in range(args.runs)]
             seconds = statistics.median(seconds for _, seconds in runs)
             nodes_by_engine[engine.name] = runs[0][0]
             nps[engine.name] = runs[0][0] / seconds
