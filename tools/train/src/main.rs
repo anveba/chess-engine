@@ -1,222 +1,106 @@
-/*
-Base: https://github.com/jw1912/bullet/blob/main/examples/simple.rs
-This is about as simple as you can get with a network, the arch is
-    (768 -> HIDDEN_SIZE)x2 -> 1
-and the training schedule is pretty sensible.
-There's potentially a lot of elo available by adjusting the wdl
-and lr schedulers, depending on your dataset.
-*/
+// Base: https://github.com/jw1912/bullet/blob/main/examples/progression/2_output_buckets.rs
+//
+// Usage: train DATA... OUTPUT_DIR
+// Several viriformat files are interleaved, so every batch mixes positions from all of them.
+
 mod input;
 
 use bullet_lib::{
+    game::outputs::MaterialCount,
     nn::optimiser::AdamW,
     trainer::{
         save::SavedFormat,
         schedule::{lr, wdl, TrainingSchedule, TrainingSteps},
         settings::LocalSettings,
     },
-    value::{loader, ValueTrainerBuilder},
+    value::{
+        loader::viribinpack::{Filter, ViriBinpackLoader, ViriFilter},
+        ValueTrainerBuilder,
+    },
 };
-use input::Chess768;
-use std::env;
+use input::Chess768EngineOrder;
 
-const HIDDEN_SIZE: usize = 256;
-const SUPERBATCHES: usize = 30;
-const THREADS: usize = 2;
-const SCALE: i32 = 400;
+const NET_NAME: str = "net";
+const HIDDEN_SIZE: usize = 512;
+const NUM_OUTPUT_BUCKETS: usize = 8;
+const SCALE: f32 = 261.0;
 const QA: i16 = 255;
 const QB: i16 = 64;
 
+const WDL_START: f32 = 0.3;
+const WDL_END: f32 = 0.5;
+const SUPERBATCHES: usize = 40;
+const INITIAL_LR: f32 = 0.001;
+const LR_DECAY: f32 = 0.3 * 0.3 * 0.3 * 0.3 * 0.3;
+
+const THREADS: usize = 2;
+const LOADER_BUFFER_MB: usize = 1024;
+
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = std::env::args();
     if args.len() < 3 {
-        panic!("Expected path to data and output");
+        panic!("Usage: train DATA... OUTPUT_DIR");
     }
-    let data_path = &args[1];
-    let out_path = &args[2];
+    let output_dir = &args[args.len() - 1];
+    let data_paths = &args[1..args.len() - 1];
 
     let mut trainer = ValueTrainerBuilder::default()
-        // makes `ntm_inputs` available below
         .dual_perspective()
-        // standard optimiser used in NNUE
-        // the default AdamW params include clipping to range [-1.98, 1.98]
         .optimiser(AdamW)
-        // basic piece-square chessboard inputs
-        .inputs(Chess768)
-        // chosen such that inference may be efficiently implemented in-engine
+        .inputs(Chess768EngineOrder)
+        .output_buckets(MaterialCount::<NUM_OUTPUT_BUCKETS>)
         .save_format(&[
             SavedFormat::id("l0w").round().quantise::<i16>(QA),
             SavedFormat::id("l0b").round().quantise::<i16>(QA),
-            SavedFormat::id("l1w").round().quantise::<i16>(QB),
+            SavedFormat::id("l1w")
+                .round()
+                .quantise::<i16>(QB)
+                .transpose(),
             SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
         ])
-        // map output into ranges [0, 1] to fit against our labels which
-        // are in the same range
-        // `target` == wdl * game_result + (1 - wdl) * sigmoid(search score in centipawns / SCALE)
-        // where `wdl` is determined by `wdl_scheduler`
         .loss_fn(|output, target| output.sigmoid().squared_error(target))
-        // the basic `(768 -> N)x2 -> 1` inference
-        .build(|builder, stm_inputs, ntm_inputs| {
-            // weights
+        .build(|builder, stm_inputs, ntm_inputs, output_buckets| {
             let l0 = builder.new_affine("l0", 768, HIDDEN_SIZE);
-            let l1 = builder.new_affine("l1", 2 * HIDDEN_SIZE, 1);
+            let l1 = builder.new_affine("l1", 2 * HIDDEN_SIZE, NUM_OUTPUT_BUCKETS);
 
-            // inference
             let stm_hidden = l0.forward(stm_inputs).screlu();
             let ntm_hidden = l0.forward(ntm_inputs).screlu();
             let hidden_layer = stm_hidden.concat(ntm_hidden);
-            l1.forward(hidden_layer)
+            l1.forward(hidden_layer).select(output_buckets)
         });
 
     let schedule = TrainingSchedule {
-        net_id: "simple".to_string(),
-        eval_scale: SCALE as f32,
+        net_id: NET_NAME.to_string(),
+        eval_scale: SCALE,
         steps: TrainingSteps {
             batch_size: 16_384,
             batches_per_superbatch: 6104,
             start_superbatch: 1,
             end_superbatch: SUPERBATCHES,
         },
-        wdl_scheduler: wdl::ConstantWDL { value: 0.4 },
+        wdl_scheduler: wdl::LinearWDL {
+            start: WDL_START,
+            end: WDL_END,
+        },
         lr_scheduler: lr::CosineDecayLR {
-            initial_lr: 0.001,
-            final_lr: 0.001 * 0.3f32.powi(5),
+            initial_lr: INITIAL_LR,
+            final_lr: INITIAL_LR * LR_DECAY,
             final_superbatch: SUPERBATCHES,
         },
         save_rate: 10,
-    };
+    }
 
     let settings = LocalSettings {
         threads: THREADS,
         test_set: None,
-        output_directory: out_path,
-        batch_queue_size: 64,
+        output_directory: output_dir,
+        batch_queue_size: 32,
     };
-
-    // loading from a Viriformat binpack
-    let _data_loader_viri = {
-        use loader::viribinpack::{Filter, ViriBinpackLoader, ViriFilter};
-
-        let buffer_size_mb = 1024;
-        let threads = THREADS;
-
-        // The `viriformat` crate exposes a useful `Filter` of its own, but you can also
-        // use a custom function like for SF binpacks with `ViriFilter::custom(function)`
-        let filter = ViriFilter::Builtin(Filter::default());
-
-        ViriBinpackLoader::new(data_path, buffer_size_mb, threads, filter)
-    };
-
-    // loading directly from a `BulletFormat` file
-    // let data_loader = loader::DirectSequentialDataLoader::new(&["data/baseline.data"]);
-
-    trainer.run(&schedule, &settings, &_data_loader_viri);
-}
-
-// ============ EXAMPLE INFERENCE STARTS HERE ============
-
-/*
-This is how you would load the network in rust.
-Commented out because it will error if it can't find the file.
-static NNUE: Network =
-    unsafe { std::mem::transmute(*include_bytes!("../checkpoints/simple-10/simple-10.bin")) };
-*/
-
-#[inline]
-/// Square Clipped ReLU - Activation Function.
-/// Note that this takes the i16s in the accumulator to i32s.
-/// Range is 0.0 .. 1.0 (in other words, 0 to QA*QA quantized).
-fn screlu(x: i16) -> i32 {
-    let y = i32::from(x).clamp(0, i32::from(QA));
-    y * y
-}
-
-/// This is the quantised format that bullet outputs.
-#[repr(C)]
-pub struct Network {
-    /// Column-Major `HIDDEN_SIZE x 768` matrix.
-    /// Values have quantization of QA.
-    feature_weights: [Accumulator; 768],
-    /// Vector with dimension `HIDDEN_SIZE`.
-    /// Values have quantization of QA.
-    feature_bias: Accumulator,
-    /// Column-Major `1 x (2 * HIDDEN_SIZE)`
-    /// matrix, we use it like this to make the
-    /// code nicer in `Network::evaluate`.
-    /// Values have quantization of QB.
-    output_weights: [i16; 2 * HIDDEN_SIZE],
-    /// Scalar output bias.
-    /// Value has quantization of QA * QB.
-    output_bias: i16,
-}
-
-impl Network {
-    /// Calculates the output of the network, starting from the already
-    /// calculated hidden layer (done efficiently during makemoves).
-    pub fn evaluate(&self, us: &Accumulator, them: &Accumulator) -> i32 {
-        // Initialise output.
-        let mut output = 0;
-
-        // Side-To-Move Accumulator -> Output.
-        for (&input, &weight) in us.vals.iter().zip(&self.output_weights[..HIDDEN_SIZE]) {
-            output += screlu(input) * i32::from(weight);
-        }
-
-        // Not-Side-To-Move Accumulator -> Output.
-        for (&input, &weight) in them.vals.iter().zip(&self.output_weights[HIDDEN_SIZE..]) {
-            output += screlu(input) * i32::from(weight);
-        }
-
-        // Reduce quantization from QA * QA * QB to QA * QB.
-        output /= i32::from(QA);
-
-        // Add bias.
-        output += i32::from(self.output_bias);
-
-        // Apply eval scale.
-        output *= SCALE;
-
-        // Remove quantisation altogether.
-        output /= i32::from(QA) * i32::from(QB);
-
-        output
-    }
-}
-
-/// A column of the feature-weights matrix.
-/// Note the `align(64)`.
-#[derive(Clone, Copy)]
-#[repr(C, align(64))]
-pub struct Accumulator {
-    vals: [i16; HIDDEN_SIZE],
-}
-
-impl Accumulator {
-    /// Initialised with bias so we can just efficiently
-    /// operate on it afterwards.
-    pub fn new(net: &Network) -> Self {
-        net.feature_bias
-    }
-
-    /// Add a feature to an accumulator.
-    pub fn add_feature(&mut self, feature_idx: usize, net: &Network) {
-        for (i, d) in self
-            .vals
-            .iter_mut()
-            .zip(&net.feature_weights[feature_idx].vals)
-        {
-            *i += *d
-        }
-    }
-
-    /// Remove a feature from an accumulator.
-    pub fn remove_feature(&mut self, feature_idx: usize, net: &Network) {
-        for (i, d) in self
-            .vals
-            .iter_mut()
-            .zip(&net.feature_weights[feature_idx].vals)
-        {
-            *i -= *d
-        }
-    }
+    let data_loader = ViriBinpackLoader::new_interleave_multiple(
+        &data_paths.iter().map(String::as_str).collect(),
+        LOADER_BUFFER_MB,
+        THREADS,
+        ViriFilter::Builtin(Filter::default()),
+    )
+    trainer.run(&schedule(), &settings, &data_loader);
 }

@@ -155,17 +155,17 @@ static std::mt19937_64 rng_unique_to(uint64_t seed, int64_t games_already_writte
     return std::mt19937_64(seeds);
 }
 
-static void generate_games(const Settings& settings, int64_t games_already_written)
+static void generate_games(const Settings& settings, const ViriFileContents& already_written)
 {
     std::ofstream output(settings.path, std::ios::binary | std::ios::app);
     std::mutex output_mutex;
-    std::atomic<int64_t> games_started = games_already_written;
-    int64_t games_written = games_already_written, new_positions = 0;
+    std::atomic<int64_t> games_started = already_written.games;
+    int64_t games_written = already_written.games, positions_written = already_written.positions, new_positions = 0;
     const auto start = std::chrono::steady_clock::now();
 
     auto play_games = [&](int thread) {
         SearchMaster searcher(1, HASH_MB);
-        std::mt19937_64 rng = rng_unique_to(settings.seed, games_already_written, thread);
+        std::mt19937_64 rng = rng_unique_to(settings.seed, already_written.games, thread);
 
         while (games_started++ < settings.total_games) {
             std::optional<GameRecord> record;
@@ -175,10 +175,11 @@ static void generate_games(const Settings& settings, int64_t games_already_writt
             std::lock_guard<std::mutex> lock(output_mutex);
             record->serialize_viri(output);
             output.flush();
+            positions_written += record->moves.size();
             new_positions += record->moves.size();
             if (++games_written % GAMES_PER_PROGRESS_REPORT == 0) {
                 const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-                std::cout << games_written << " games, " << new_positions << " new positions, "
+                std::cout << games_written << " games, " << positions_written << " positions, "
                           << int(new_positions / seconds) << " positions/s" << std::endl;
             }
         }
@@ -190,7 +191,7 @@ static void generate_games(const Settings& settings, int64_t games_already_writt
     for (std::thread& worker : workers)
         worker.join();
 
-    std::cout << "Done: " << games_written << " games" << std::endl;
+    std::cout << "Done: " << games_written << " games, " << positions_written << " positions" << std::endl;
 }
 
 int main(int argc, char** argv)
@@ -211,10 +212,10 @@ int main(int argc, char** argv)
     precompute_bitboards();
     precompute_board_constants();
 
-    const int64_t games_already_written = keep_complete_viri_games(settings.path);
-    std::cout << "Playing " << std::max<int64_t>(settings.total_games - games_already_written, 0) << " more games on "
+    const ViriFileContents already_written = keep_complete_viri_games(settings.path);
+    std::cout << "Playing " << std::max<int64_t>(settings.total_games - already_written.games, 0) << " more games on "
               << settings.threads << " threads at " << settings.nodes_per_move << " nodes per move, seed "
               << settings.seed << std::endl;
 
-    generate_games(settings, games_already_written);
+    generate_games(settings, already_written);
 }

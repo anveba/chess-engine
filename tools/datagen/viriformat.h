@@ -26,6 +26,12 @@ struct GameRecord
     void serialize_viri(std::ostream& out) const;
 };
 
-int64_t keep_complete_viri_games(const std::string& path);
+struct ViriFileContents
+{
+    int64_t games = 0;
+    int64_t positions = 0;
+};
+
+ViriFileContents keep_complete_viri_games(const std::string& path);
 
 #endif

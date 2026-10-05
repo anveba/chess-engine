@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 
 #include "board.h"
 #include "search.h"
@@ -79,33 +80,37 @@ void GameRecord::serialize_viri(std::ostream& out) const
     out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 }
 
-static bool read_past_complete_game(std::istream& in)
+static std::optional<int64_t> positions_in_next_complete_game(std::istream& in)
 {
     char header[HEADER_SIZE];
     if (!in.read(header, sizeof(header)))
-        return false;
+        return std::nullopt;
 
+    int64_t positions = 0;
     uint32_t move_and_score;
-    while (in.read(reinterpret_cast<char*>(&move_and_score), sizeof(move_and_score)))
+    while (in.read(reinterpret_cast<char*>(&move_and_score), sizeof(move_and_score))) {
         if (move_and_score == END_OF_GAME)
-            return true;
-    return false;
+            return positions;
+        positions++;
+    }
+    return std::nullopt;
 }
 
-int64_t keep_complete_viri_games(const std::string& path)
+ViriFileContents keep_complete_viri_games(const std::string& path)
 {
+    ViriFileContents complete;
     if (!std::filesystem::exists(path))
-        return 0;
+        return complete;
 
     std::ifstream in(path, std::ios::binary);
-    int64_t complete_games = 0;
     std::streamoff end_of_complete_games = 0;
-    while (read_past_complete_game(in)) {
-        complete_games++;
+    while (std::optional<int64_t> positions = positions_in_next_complete_game(in)) {
+        complete.games++;
+        complete.positions += *positions;
         end_of_complete_games = in.tellg();
     }
     in.close();
 
     std::filesystem::resize_file(path, end_of_complete_games);
-    return complete_games;
+    return complete;
 }
