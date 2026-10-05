@@ -7,6 +7,7 @@
 #include "movegen.h"
 #include "moveorder.h"
 #include "rng.h"
+#include "tune.h"
 #include "util.h"
 
 #ifdef SEARCH_STATS
@@ -17,18 +18,22 @@
 
 constexpr int QUIESCENCE_DEPTH = 0;
 
-constexpr int NULL_MOVE_REDUCTION = 3;
-constexpr int NULL_MOVE_DEPTH_DIVISOR = 6;
-constexpr int NULL_MOVE_MIN_DEPTH = 4;
+TUNABLE(NULL_MOVE_REDUCTION, 3, 1, 6);
+TUNABLE(NULL_MOVE_DEPTH_DIVISOR, 6, 2, 12);
+TUNABLE(NULL_MOVE_MIN_DEPTH, 4, 2, 8);
 
-constexpr MoveEval DELTA_MARGIN = 200;
+TUNABLE(DELTA_MARGIN, 200, 0, 500);
 
-constexpr int LMR_MIN_DEPTH = 3;
-constexpr int LMR_MIN_MOVE_INDEX = 3;
-constexpr double LMR_BASE = 0.75;
-constexpr double LMR_DIVISOR = 2.25;
+TUNABLE(LMR_MIN_DEPTH, 3, 1, 6);
+TUNABLE(LMR_MIN_MOVE_INDEX, 3, 1, 8);
+TUNABLE(LMR_BASE_PERCENT, 75, 0, 200);
+TUNABLE(LMR_DIVISOR_PERCENT, 225, 100, 500);
 
+TUNABLE(HISTORY_BONUS_DEPTH_SQUARED_PERCENT, 100, 25, 400);
+
+#ifndef TUNE
 static_assert(NULL_MOVE_REDUCTION < NULL_MOVE_MIN_DEPTH);
+#endif
 
 static bool zugzwang_risk(const Board& board)
 {
@@ -42,7 +47,7 @@ static bool is_draw(const Board& board, int root_dist)
 
 static int late_move_reduction(int depth, int move_index)
 {
-    return int(LMR_BASE + std::log(depth) * std::log(move_index) / LMR_DIVISOR);
+    return int(LMR_BASE_PERCENT / 100.0 + std::log(depth) * std::log(move_index) / (LMR_DIVISOR_PERCENT / 100.0));
 }
 
 void SearchWorker::tt_store(TEntryHandle& handle, BoardEval eval, Move best_move, int depth, TableBound bound, int root_dist)
@@ -237,7 +242,7 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
 
             // We assume captures ordered well, so only quiet moves are remembered.
             if (!board.is_loud(move)) {
-                const MoveEval bonus = depth * depth;
+                const MoveEval bonus = depth * depth * HISTORY_BONUS_DEPTH_SQUARED_PERCENT / 100;
                 store_killer(f.root_dist, move);
                 update_history(board.side(), move, bonus);
                 for (int i = 0; i < quiets_searched_count; i++)

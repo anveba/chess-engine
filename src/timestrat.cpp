@@ -1,34 +1,42 @@
 #include "timestrat.h"
 
 #include <algorithm>
-#include <iterator>
+#include <cmath>
 
 #include "search.h"
+#include "tune.h"
 
 // See https://www.chessprogramming.org/Time_Management.
 
 constexpr Ms MIN_TIME_MS = 1;
-constexpr int DEFAULT_MOVES_TO_GO = 30;
-constexpr int MAX_MOVES_TO_GO = 50;
-constexpr double INCREMENT_FRACTION_TO_USE_PER_MOVE = 0.75;
-constexpr double HARD_LIMIT_FACTOR_OF_SOFT = 4.0;
-constexpr double MIN_HARD_FRACTION_OF_REMAINING = 0.3;
-constexpr double MAX_HARD_FRACTION_OF_REMAINING = 0.9;
+TUNABLE(DEFAULT_MOVES_TO_GO, 30, 10, 60);
+TUNABLE(MAX_MOVES_TO_GO, 50, 20, 100);
+TUNABLE(INCREMENT_PERCENT_TO_USE_PER_MOVE, 75, 25, 100);
+TUNABLE(HARD_LIMIT_PERCENT_OF_SOFT, 400, 150, 800);
+TUNABLE(MIN_HARD_PERCENT_OF_REMAINING, 30, 10, 60);
+TUNABLE(MAX_HARD_PERCENT_OF_REMAINING, 90, 50, 98);
 
-constexpr double LATEST_START_TIME_FRACTION = 0.5;
+TUNABLE(LATEST_START_TIME_PERCENT, 50, 20, 90);
 
-constexpr double STABILITY_SCALE[] = { 1.5, 1.2, 1.0, 0.8, 0.7, 0.65 };
-constexpr int MAX_STABILITY_INDEX = int(std::size(STABILITY_SCALE)) - 1;
+TUNABLE(STABILITY_SCALE_MAX_PERCENT, 150, 100, 250);
+TUNABLE(STABILITY_SCALE_MIN_PERCENT, 60, 30, 100);
+TUNABLE(STABILITY_DECAY_PERCENT, 67, 30, 95);
 
-constexpr double DEFAULT_PER_ITERATION_GROWTH = 4.0;
-constexpr double MIN_PER_ITERATION_GROWTH = 1.5;
-constexpr double MAX_PER_ITERATION_GROWTH = 10.0;
+TUNABLE(DEFAULT_PER_ITERATION_GROWTH_PERCENT, 400, 150, 1000);
+TUNABLE(MIN_PER_ITERATION_GROWTH_PERCENT, 150, 100, 300);
+TUNABLE(MAX_PER_ITERATION_GROWTH_PERCENT, 1000, 400, 2000);
 constexpr Us MIN_MEASURABLE_ITERATION_US = 200;
-constexpr double MAX_PREDICTED_OVERSHOOT = 2.0;
+TUNABLE(MAX_PREDICTED_OVERSHOOT_PERCENT, 200, 100, 400);
 
-constexpr int EVAL_DROP_MARGIN = 25;
-constexpr double EVAL_DROP_SCALE = 1.5;
-constexpr int STABLE_MATE_ITERATIONS = 2;
+TUNABLE(EVAL_DROP_MARGIN, 25, 5, 100);
+TUNABLE(EVAL_DROP_SCALE_PERCENT, 150, 100, 250);
+TUNABLE(STABLE_MATE_ITERATIONS, 2, 1, 6);
+
+static double stability_scale(int stable_iterations)
+{
+    const double decay = std::pow(STABILITY_DECAY_PERCENT / 100.0, stable_iterations);
+    return (STABILITY_SCALE_MIN_PERCENT + (STABILITY_SCALE_MAX_PERCENT - STABILITY_SCALE_MIN_PERCENT) * decay) / 100;
+}
 
 TimeLimits TimeManager::compute_limits(Colour side, const SearchConditions& conditions, Ms move_overhead)
 {
@@ -42,10 +50,10 @@ TimeLimits TimeManager::compute_limits(Colour side, const SearchConditions& cond
     const double available = std::max(remaining - move_overhead, MIN_TIME_MS);
 
     const int horizon = conditions.moves_to_go > 0 ? std::min(conditions.moves_to_go, MAX_MOVES_TO_GO) : DEFAULT_MOVES_TO_GO;
-    const double max_fraction = std::clamp(HARD_LIMIT_FACTOR_OF_SOFT / horizon, MIN_HARD_FRACTION_OF_REMAINING, MAX_HARD_FRACTION_OF_REMAINING);
+    const double max_fraction = std::clamp(HARD_LIMIT_PERCENT_OF_SOFT / 100.0 / horizon, MIN_HARD_PERCENT_OF_REMAINING / 100.0, MAX_HARD_PERCENT_OF_REMAINING / 100.0);
 
-    const double soft = available / horizon + increment * INCREMENT_FRACTION_TO_USE_PER_MOVE;
-    const double hard = std::min(soft * HARD_LIMIT_FACTOR_OF_SOFT, available * max_fraction);
+    const double soft = available / horizon + increment * INCREMENT_PERCENT_TO_USE_PER_MOVE / 100.0;
+    const double hard = std::min(soft * HARD_LIMIT_PERCENT_OF_SOFT / 100.0, available * max_fraction);
 
     return { std::max(Ms(std::min(soft, hard)), MIN_TIME_MS), std::max(Ms(hard), MIN_TIME_MS), false };
 }
@@ -86,20 +94,20 @@ bool TimeManager::should_stop_at_iteration(const IterationInfo& iteration, Us el
         return true;
 
     // Adjust target time
-    double additional_time_factor = STABILITY_SCALE[std::min(stable_iterations, MAX_STABILITY_INDEX)];
+    double additional_time_factor = stability_scale(stable_iterations);
     if (score_dropped)
-        additional_time_factor *= EVAL_DROP_SCALE;
+        additional_time_factor *= EVAL_DROP_SCALE_PERCENT / 100.0;
 
     const double target_us = std::min(limits.soft * additional_time_factor, double(limits.hard)) * 1000;
 
-    if (elapsed >= target_us * LATEST_START_TIME_FRACTION)
+    if (elapsed >= target_us * LATEST_START_TIME_PERCENT / 100.0)
         return true;
 
     // Predict next iteration's time
     const double predicted_iteration_growth = prev_dur >= MIN_MEASURABLE_ITERATION_US
-                              ? std::clamp(double(iteration.duration) / prev_dur, MIN_PER_ITERATION_GROWTH, MAX_PER_ITERATION_GROWTH)
-                              : DEFAULT_PER_ITERATION_GROWTH;
+                                                  ? std::clamp(double(iteration.duration) / prev_dur, MIN_PER_ITERATION_GROWTH_PERCENT / 100.0, MAX_PER_ITERATION_GROWTH_PERCENT / 100.0)
+                                                  : DEFAULT_PER_ITERATION_GROWTH_PERCENT / 100.0;
     const double predicted_finish = elapsed + iteration.duration * predicted_iteration_growth;
 
-    return predicted_finish > std::min(target_us * MAX_PREDICTED_OVERSHOOT, limits.hard * 1000.0);
+    return predicted_finish > std::min(target_us * MAX_PREDICTED_OVERSHOOT_PERCENT / 100.0, limits.hard * 1000.0);
 }

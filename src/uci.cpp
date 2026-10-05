@@ -9,6 +9,7 @@
 #include "moveorder.h"
 #include "perft.h"
 #include "test.h"
+#include "tune.h"
 #include "util.h"
 
 constexpr int64_t DEFAULT_THREAD_COUNT = 1;
@@ -43,6 +44,11 @@ UCI::UCI()
     UCIOption log_option("Debug Log File", STRING_OPTION, "");
     log_option.set_on_change_callback([&](UCIOption* opt) { set_debug_log(opt->get_string()); });
     options.push_back(log_option);
+
+#ifdef TUNE
+    for (const UCIOption& option : tunable_options())
+        options.push_back(option);
+#endif
 }
 
 void UCI::start()

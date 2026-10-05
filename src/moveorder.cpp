@@ -3,12 +3,35 @@
 #include <algorithm>
 #include <cassert>
 
-constexpr MoveEval ORDERING_VALUES[MAX_PIECE_TYPE] = { 0, 100, 500, 320, 330, 900, 10000 };
+constexpr MoveEval PAWN_ORDERING_VALUE = 100;
+TUNABLE(KNIGHT_ORDERING_VALUE, 320, 200, 500);
+TUNABLE(BISHOP_ORDERING_VALUE, 330, 200, 500);
+TUNABLE(ROOK_ORDERING_VALUE, 500, 350, 800);
+TUNABLE(QUEEN_ORDERING_VALUE, 900, 700, 1400);
+constexpr MoveEval KING_ORDERING_VALUE = 10000;
+
+TUNABLE(ATTACKER_VALUE_DIVISOR, 10, 2, 50);
+
 constexpr PieceType PIECE_BY_VALUE[] = { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING };
 
-constexpr MoveEval ordering_value(PieceType p)
+static MoveEval ordering_value(PieceType p)
 {
-    return ORDERING_VALUES[p];
+    switch (p) {
+        case PAWN:
+            return PAWN_ORDERING_VALUE;
+        case KNIGHT:
+            return KNIGHT_ORDERING_VALUE;
+        case BISHOP:
+            return BISHOP_ORDERING_VALUE;
+        case ROOK:
+            return ROOK_ORDERING_VALUE;
+        case QUEEN:
+            return QUEEN_ORDERING_VALUE;
+        case KING:
+            return KING_ORDERING_VALUE;
+        default:
+            return 0;
+    }
 }
 
 static Bitboard enemy_pawn_attacks(const Board& board)
@@ -31,9 +54,9 @@ static MoveEval material_gain(const Board& board, Move move)
     MoveEval gain = 0;
     const MoveEval attacker_value = std::min(ordering_value(type_of(board.at(move.from_sq()))), ordering_value(QUEEN));
     if (is_piece(to_piece))
-        gain += ordering_value(type_of(to_piece)) - attacker_value / 10;
+        gain += ordering_value(type_of(to_piece)) - attacker_value / ATTACKER_VALUE_DIVISOR;
     else if (move.is_ep())
-        gain += ordering_value(PAWN) - ordering_value(PAWN) / 10;
+        gain += ordering_value(PAWN) - ordering_value(PAWN) / ATTACKER_VALUE_DIVISOR;
 
     if (move.is_promotion())
         gain += ordering_value(move.promotion_to()) - ordering_value(PAWN);
@@ -153,9 +176,13 @@ bool see_threshold(const Board& board, Move move, MoveEval threshold)
     return side == board.side();
 }
 
-MovePicker::MovePicker(const Board& board, MoveList& list, Move first, const Move* killers,
-                       const MoveEval* side_history)
-    : board(board), killers(killers), side_history(side_history), moves(list.begin()), size(list.size()), next_loud(0)
+MovePicker::MovePicker(const Board& board, MoveList& list, Move first, const Move* killers, const MoveEval* side_history)
+    : board(board)
+    , killers(killers)
+    , side_history(side_history)
+    , moves(list.begin())
+    , size(list.size())
+    , next_loud(0)
 {
     Move* found = first.is_proper() ? std::find(moves, moves + size, first) : moves + size;
     if (found != moves + size) {
@@ -168,58 +195,58 @@ MovePicker::MovePicker(const Board& board, MoveList& list, Move first, const Mov
 Move MovePicker::next()
 {
     switch (stage) {
-    case FIRST:
-        stage = PARTITION;
-        return moves[0];
+        case FIRST:
+            stage = PARTITION;
+            return moves[0];
 
-    case PARTITION:
-        partition_by_loudness();
-        stage = GOOD_LOUD;
-        [[fallthrough]];
+        case PARTITION:
+            partition_by_loudness();
+            stage = GOOD_LOUD;
+            [[fallthrough]];
 
-    case GOOD_LOUD:
-        while (next_loud < good_loud_end) {
-            const int best = best_in(next_loud, good_loud_end);
-            // Is it actually a good capture?
-            if (see_threshold(board, moves[best], 0))
-                return consume(next_loud, best);
-            // A bad capture, move it to the bad loud moves.
-            good_loud_end--;
-            std::swap(moves[best], moves[good_loud_end]);
-            std::swap(scores[best], scores[good_loud_end]);
-        }
-        stage = KILLERS;
-        [[fallthrough]];
+        case GOOD_LOUD:
+            while (next_loud < good_loud_end) {
+                const int best = best_in(next_loud, good_loud_end);
+                // Is it actually a good capture?
+                if (see_threshold(board, moves[best], 0))
+                    return consume(next_loud, best);
+                // A bad capture, move it to the bad loud moves.
+                good_loud_end--;
+                std::swap(moves[best], moves[good_loud_end]);
+                std::swap(scores[best], scores[good_loud_end]);
+            }
+            stage = KILLERS;
+            [[fallthrough]];
 
-    case KILLERS:
-        // Only quiet moves are searched, since a killer may be a capture here.
-        while (killers && killer_index < KILLER_SLOTS) {
-            const Move* found = std::find(moves + next_quiet, moves + size, killers[killer_index++]);
-            if (found != moves + size)
-                return consume(next_quiet, found - moves);
-        }
-        stage = SCORE_QUIETS;
-        [[fallthrough]];
+        case KILLERS:
+            // Only quiet moves are searched, since a killer may be a capture here.
+            while (killers && killer_index < KILLER_SLOTS) {
+                const Move* found = std::find(moves + next_quiet, moves + size, killers[killer_index++]);
+                if (found != moves + size)
+                    return consume(next_quiet, found - moves);
+            }
+            stage = SCORE_QUIETS;
+            [[fallthrough]];
 
-    case SCORE_QUIETS:
-        score_quiets();
-        stage = QUIETS;
-        [[fallthrough]];
+        case SCORE_QUIETS:
+            score_quiets();
+            stage = QUIETS;
+            [[fallthrough]];
 
-    case QUIETS:
-        if (next_quiet < size)
-            return consume(next_quiet, best_in(next_quiet, size));
-        stage = BAD_LOUD;
-        [[fallthrough]];
+        case QUIETS:
+            if (next_quiet < size)
+                return consume(next_quiet, best_in(next_quiet, size));
+            stage = BAD_LOUD;
+            [[fallthrough]];
 
-    case BAD_LOUD:
-        if (next_loud < loud_end)
-            return consume(next_loud, best_in(next_loud, loud_end));
-        stage = DONE;
-        [[fallthrough]];
+        case BAD_LOUD:
+            if (next_loud < loud_end)
+                return consume(next_loud, best_in(next_loud, loud_end));
+            stage = DONE;
+            [[fallthrough]];
 
-    case DONE:
-        return Move::make_none();
+        case DONE:
+            return Move::make_none();
     }
     return Move::make_none();
 }

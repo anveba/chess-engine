@@ -20,13 +20,14 @@ TEST_HEADERS := $(wildcard tests/unit/*.h)
 
 default: release
 
-.PHONY: release debug profile stats sanitize tsan
+.PHONY: release debug profile stats sanitize tsan tune
 release: $(BIN_PATH)/chess          # Optimised engine.
 debug: $(BIN_PATH)/chess-debug      # Asserts on, debug info, no profiling.
 profile: $(BIN_PATH)/chess-profile  # For gprof. Writes gmon.out when run.
 stats: $(BIN_PATH)/chess-stats      # Prints search statistics after each iteration.
 sanitize: $(BIN_PATH)/chess-asan    # AddressSanitizer and UndefinedBehaviorSanitizer.
 tsan: $(BIN_PATH)/chess-tsan        # ThreadSanitizer.
+tune: $(BIN_PATH)/chess-tune        # Tunable constants exposed as UCI options, for SPSA.
 
 $(BIN_PATH):
 	@mkdir -p $(BIN_PATH)
@@ -48,6 +49,9 @@ $(BIN_PATH)/chess-asan: $(SRC) $(HEADERS) $(NETS) | $(BIN_PATH)
 
 $(BIN_PATH)/chess-tsan: $(SRC) $(HEADERS) $(NETS) | $(BIN_PATH)
 	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(TSAN_FLAGS)
+
+$(BIN_PATH)/chess-tune: $(SRC) $(HEADERS) $(NETS) | $(BIN_PATH)
+	$(CC) -o $@ $(SRC) $(FLAGS) $(INCLUDE) $(RELEASE_FLAGS) -DTUNE
 
 # Unit tests are built with asserts on.
 $(BIN_PATH)/tests: $(SRC) $(HEADERS) $(NETS) $(TEST_SRC) $(TEST_HEADERS) | $(BIN_PATH)
