@@ -22,14 +22,21 @@ TUNABLE(NULL_MOVE_REDUCTION, 4, 1, 6);
 TUNABLE(NULL_MOVE_DEPTH_DIVISOR, 7, 2, 12);
 TUNABLE(NULL_MOVE_MIN_DEPTH, 1, 1, 8);
 
-TUNABLE(DELTA_MARGIN, 229, 0, 500);
+TUNABLE(DELTA_MARGIN, 270, 0, 500);
 
 TUNABLE(LMR_MIN_DEPTH, 3, 1, 6);
 TUNABLE(LMR_MIN_MOVE_INDEX, 3, 1, 8);
-TUNABLE(LMR_BASE_PERCENT, 67, 0, 200);
-TUNABLE(LMR_DIVISOR_PERCENT, 224, 100, 500);
+TUNABLE(LMR_BASE_PERCENT, 65, 0, 200);
+TUNABLE(LMR_DIVISOR_PERCENT, 198, 100, 500);
 
-TUNABLE(HISTORY_BONUS_DEPTH_SQUARED_PERCENT, 105, 25, 400);
+TUNABLE(HISTORY_BONUS_DEPTH_SQUARED_PERCENT, 117, 25, 400);
+
+TUNABLE(RFP_MAX_DEPTH, 7, 4, 12);
+TUNABLE(RFP_MARGIN_FACTOR, 92, 25, 400);
+TUNABLE(RFP_EVAL_WEIGHT_PERCENT, 50, 0, 100);
+
+TUNABLE(ASPIRATION_WINDOW_SIZE, 50, 1, 200);
+TUNABLE(ASPIRATION_WINDOW_GROWTH_PERCENT, 400, 150, 800);
 
 static bool zugzwang_risk(const Board& board)
 {
@@ -49,6 +56,13 @@ static int late_move_reduction(int depth, int move_index)
 void SearchWorker::tt_store(TEntryHandle& handle, BoardEval eval, Move best_move, int depth, TableBound bound, int root_dist)
 {
     master->ttable.insert(handle, eval_to_tt(eval, root_dist), best_move, depth, bound);
+}
+
+static BoardEval lazy_eval(const Board& board, BoardEval& eval)
+{
+    if (eval >= INF_EVAL)
+        eval = evaluate(board);
+    return eval;
 }
 
 template<SearchNode Node>
@@ -108,43 +122,55 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
     next_frame.root_dist = f.root_dist + 1;
     next_frame.extensions = f.extensions;
 
-    // Try null move to see if it causes a beta cutoff.
-    // Assuming making a move is better than not making one, if a beta cutoff occurs with a null
-    // move, it will likely also occur in normal search. If no cutoff occurs, we search the node
-    // as normal.
-    if (Node != PV_NODE &&
-        !board.previous_was_null_move() &&
-        depth >= NULL_MOVE_MIN_DEPTH &&
-        !board.checkers() &&
-        !zugzwang_risk(board) &&
-        evaluate(board) >= beta) {
+    const bool is_in_check = board.checkers();
 
-        assert(!f.is_leftmost);
+    if (Node != PV_NODE && !is_in_check) {
+        BoardEval static_eval = INF_EVAL;
 
-        next_frame.pv.length = 0;
-        next_frame.is_leftmost = false;
+        // Reverse futility pruning
+        if ((!tt_probe.hit || tt_handle.best_move.is_none() || board.is_capture(tt_probe.handle.best_move)) &&
+            depth <= RFP_MAX_DEPTH &&
+            !is_mate(beta) &&
+            lazy_eval(board, static_eval) > beta + depth * RFP_MARGIN_FACTOR) {
+            return (static_eval * RFP_EVAL_WEIGHT_PERCENT / 100 + beta * (100 - RFP_EVAL_WEIGHT_PERCENT) / 100);
+        }
 
-        STAT(null_tries);
+        // Try null move to see if it causes a beta cutoff.
+        // Assuming making a move is better than not making one, if a beta cutoff occurs with a null
+        // move, it will likely also occur in normal search. If no cutoff occurs, we search the node
+        // as normal.
+        if (depth >= NULL_MOVE_MIN_DEPTH &&
+            !board.previous_was_null_move() &&
+            !zugzwang_risk(board) &&
+            lazy_eval(board, static_eval) >= beta) {
 
-        BoardMemory memory;
-        board.make_null_move(memory);
+            assert(!f.is_leftmost);
 
-        const int reduction = NULL_MOVE_REDUCTION + depth / NULL_MOVE_DEPTH_DIVISOR;
-        BoardEval null_eval = -alpha_beta<NON_PV_NODE>(board, next_frame, -beta, -beta + 1, depth - reduction);
+            next_frame.pv.length = 0;
+            next_frame.is_leftmost = false;
 
-        board.unmake_null_move();
+            STAT(null_tries);
 
-        // An aborted null move search returns a meaningless value
-        if (master->is_aborted())
-            return alpha;
+            BoardMemory memory;
+            board.make_null_move(memory);
 
-        if (null_eval >= beta) {
-            STAT(null_cutoffs);
-            // A null move is not legal, so a mate found after it is not correct.
-            if (is_mate(null_eval))
-                null_eval = beta;
-            tt_store(tt_handle, null_eval, tt_handle.best_move, depth, LOWER_BOUND, f.root_dist);
-            return null_eval;
+            const int reduction = NULL_MOVE_REDUCTION + depth / NULL_MOVE_DEPTH_DIVISOR;
+            BoardEval null_eval = -alpha_beta<NON_PV_NODE>(board, next_frame, -beta, -beta + 1, depth - reduction);
+
+            board.unmake_null_move();
+
+            // An aborted null move search returns a meaningless value
+            if (master->is_aborted())
+                return alpha;
+
+            if (null_eval >= beta) {
+                STAT(null_cutoffs);
+                // A null move is not legal, so a mate found after it is not correct.
+                if (is_mate(null_eval))
+                    null_eval = beta;
+                tt_store(tt_handle, null_eval, tt_handle.best_move, depth, LOWER_BOUND, f.root_dist);
+                return null_eval;
+            }
         }
     }
 
@@ -160,7 +186,6 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
     Move quiets_searched[MAX_MOVES];
     int quiets_searched_count = 0;
 
-    const bool is_in_check = board.checkers();
     const Move* killers_here = killers[f.root_dist];
 
     // Consider every legal move
@@ -176,7 +201,7 @@ BoardEval SearchWorker::alpha_beta(Board& board, StackFrame& f, BoardEval alpha,
 
         BoardMemory memory;
         board.make_move(move, memory);
-        const bool gives_check = board.checkers();
+        const bool gives_check = board.checkers(); // TODO detect check before making the move
 
         // Perform check extension
         int extension = 0;
@@ -428,7 +453,29 @@ BoardEval SearchWorker::iterative_deepening(ISearchReceiver& receiver, Board& bo
 
         const Us iteration_start = now_us();
         sel_depth = 0;
-        eval = alpha_beta<PV_NODE>(board, root_frame, -INF_EVAL, INF_EVAL, depth);
+
+        int window = ASPIRATION_WINDOW_SIZE;
+        BoardEval alpha = -INF_EVAL, beta = INF_EVAL;
+        if (depth > 1 && !is_mate(last_best)) {
+            alpha = std::max<int>(last_best - window, -INF_EVAL);
+            beta = std::min<int>(last_best + window, INF_EVAL);
+        }
+        while (true) {
+            eval = alpha_beta<PV_NODE>(board, root_frame, alpha, beta, depth);
+            if (master->is_aborted() || (eval > alpha && eval < beta))
+                break;
+            window = window * ASPIRATION_WINDOW_GROWTH_PERCENT / 100;
+            if (is_mate(eval)) {
+                alpha = -INF_EVAL;
+                beta = INF_EVAL;
+            } else if (eval <= alpha) {
+                alpha = std::max<int>(eval - window, -INF_EVAL);
+            } else if (eval >= beta) {
+                beta = std::min<int>(eval + window, INF_EVAL);
+            } else {
+                break;
+            }
+        }
         const bool completed = !master->is_aborted();
 
         // Since we always search the previous PV first we can still use a partial search. In
@@ -437,7 +484,7 @@ BoardEval SearchWorker::iterative_deepening(ISearchReceiver& receiver, Board& bo
         // evaluation and we use the previous PV. By checking if the evaluation was infinity,
         // we check whether or not we got to do any searching that yielded results before
         // stopping.
-        if (std::abs(eval) < INF_EVAL) {
+        if (std::abs(eval) < INF_EVAL && eval > alpha && eval < beta) {
             last_best = eval;
             prev_pv.copy(root_frame.pv);
         }

@@ -103,15 +103,17 @@ TEST(see_matches_known_exchanges)
         const char* move;
         MoveEval value;
     };
+    const MoveEval pawn = ordering_value(PAWN), knight = ordering_value(KNIGHT), rook = ordering_value(ROOK);
     const Case cases[] = {
-        // The traces on https://www.chessprogramming.org/SEE_-_The_Swap_Algorithm, with a knight worth 320.
-        { "1k1r4/1pp4p/p7/4p3/8/P5P1/1PP4P/2K1R3 w - - 0 1", "e1e5", 100 },
-        { "1k1r3q/1ppn3p/p4b2/4p3/8/P2N2P1/1PP1R1BP/2K1Q3 w - - 0 1", "d3e5", -220 },
-        { "3qk3/3r4/8/3p4/8/8/3R4/3QK3 w - - 0 1", "d2d5", -400 },
-        { "r1bq1rk1/1ppn1pbp/3ppnp1/p7/2PP1B2/P1N1PN2/1P2BPPP/R2QK2R w KQ - 0 9", "f3e5", -220 },
-        { "4k3/8/2n5/3p4/8/5N2/8/4K3 w - - 0 1", "f3d4", -320 },
-        { "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6", 100 },
-        { "3rk3/2P5/8/8/8/8/8/4K3 w - - 0 1", "c7d8q", 400 },
+        // The first two are from https://www.chessprogramming.org/SEE_-_The_Swap_Algorithm.
+        { "1k1r4/1pp4p/p7/4p3/8/P5P1/1PP4P/2K1R3 w - - 0 1", "e1e5", pawn },
+        { "1k1r3q/1ppn3p/p4b2/4p3/8/P2N2P1/1PP1R1BP/2K1Q3 w - - 0 1", "d3e5", pawn - knight },
+        { "3qk3/3r4/8/3p4/8/8/3R4/3QK3 w - - 0 1", "d2d5", pawn - rook },
+        { "r1bq1rk1/1ppn1pbp/3ppnp1/p7/2PP1B2/P1N1PN2/1P2BPPP/R2QK2R w KQ - 0 9", "f3e5", pawn - knight },
+        { "4k3/8/2n5/3p4/8/5N2/8/4K3 w - - 0 1", "f3d4", -knight },
+        { "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6", pawn },
+        // promotions
+        { "3rk3/2P5/8/8/8/8/8/4K3 w - - 0 1", "c7d8q", rook - pawn },
         { "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "e1g1", 0 },
     };
 

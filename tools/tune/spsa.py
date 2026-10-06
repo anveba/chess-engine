@@ -2,7 +2,7 @@
 """Tunes the engine's TUNABLE parameters with SPSA. The tuned values are written to --output for apply.py.
 
 Usage:
-    spsa.py --openings FILE --output FILE [--iterations N] [--pairs N] [--tc TC] [--params NAME,...] [--fastchess PATH]
+    spsa.py --openings FILE --output FILE [--iterations N] [--pairs N] [--concurrency N] [--tc TC] [--params NAME,...] [--fastchess PATH]
 """
 
 import argparse
@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -28,9 +29,9 @@ REPO = Path(__file__).resolve().parents[2]
 RESULTS_LINE = re.compile(r"Wins: (\d+), Losses: (\d+)")
 
 
-def match(plus, minus, book, tune_binary, run_dir, tc, pairs, fastchess_path):
+def match(plus, minus, book, tune_binary, run_dir, tc, pairs, concurrency, fastchess_path):
     cmd = fastchess.command([fastchess.Engine("plus", tune_binary, options=plus), fastchess.Engine("minus", tune_binary, options=minus)],
-                            tc=tc, openings=book, games=2 * pairs, concurrency=pairs, seed=random.randrange(2**31),
+                            tc=tc, openings=book, games=2 * pairs, concurrency=concurrency, seed=random.randrange(2**31),
                             fastchess=fastchess_path)
     lines = []
     fastchess.run_in_dir_with_log(cmd, run_dir, lines.append)
@@ -77,6 +78,7 @@ def spsa(n, params, names, low, high, play, output, alpha=0.602, gamma=0.101, r_
     start, params = load_state(output, names) or (0, params)
 
     for k in range(start, n):
+        iteration_start = time.time()
         ak, ck = step_sizes(k)
         delta_p = np.random.choice([-1, 1], size=len(params))
 
@@ -85,7 +87,7 @@ def spsa(n, params, names, low, high, play, output, alpha=0.602, gamma=0.101, r_
         params = np.clip(params + ak * result / (ck * delta_p), low, high)
 
         save_state(output, names, params, k + 1)
-        print(f"Iteration {k + 1}/{n}: {result:+d}", flush=True)
+        print(f"Iteration {k + 1}/{n}: {result:+d} ({time.time() - iteration_start:.0f} s)", flush=True)
 
     return params
 
@@ -95,8 +97,9 @@ def main():
     parser.add_argument("--openings", required=True, help="EPD file with opening positions")
     parser.add_argument("--output", required=True, help="file for the tuned values, rewritten after every iteration")
     parser.add_argument("--iterations", type=int, default=2000)
-    parser.add_argument("--pairs", type=int, default=8, help="game pairs per iteration, played in parallel (default 8)")
-    parser.add_argument("--tc", default="8+0.08")
+    parser.add_argument("--pairs", type=int, default=6, help="game pairs per iteration (default 6)")
+    parser.add_argument("--concurrency", type=int, default=os.cpu_count() - 1, help="games played at once")
+    parser.add_argument("--tc", default="5+0.05")
     parser.add_argument("--params", help="comma-separated names to tune (default all)")
     parser.add_argument("--fastchess", default="fastchess", help="path to fastchess (default: fastchess from PATH)")
     args = parser.parse_args()
@@ -110,9 +113,10 @@ def main():
     tune_binary = shutil.copy2(REPO / "bin" / "chess-tune", run_dir)  # copy so we can rebuild while running
 
     def play(plus, minus):
-        return match(plus, minus, args.openings, tune_binary, run_dir, args.tc, args.pairs, args.fastchess)
+        return match(plus, minus, args.openings, tune_binary, run_dir, args.tc, args.pairs, args.concurrency, args.fastchess)
 
-    print(f"Tuning {len(params)} parameters for {args.iterations} iterations of {args.pairs} pairs. Log in {run_dir}")
+    print(f"Tuning {len(params)} parameters for {args.iterations} iterations of {args.pairs} pairs at {args.tc}, "
+          f"{args.concurrency} games at once. Log in {run_dir}")
     spsa(args.iterations, np.array([p.value for p in params], dtype=float), [p.uci_name() for p in params],
          np.array([p.min for p in params]), np.array([p.max for p in params]), play, args.output)
 

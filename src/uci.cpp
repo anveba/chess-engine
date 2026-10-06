@@ -380,23 +380,11 @@ void UCI::start_test(std::istringstream& in)
 
 void UCI::start_bench(std::istringstream& in)
 {
-    int depth = DEFAULT_BENCH_DEPTH;
-    std::string token;
-    if (in >> token) {
-        try {
-            depth = std::min(std::stoi(token), MAX_DEPTH);
-        } catch (const std::exception&) {
-            log_sync("Unknown arguments.\n");
-            return;
-        }
-    }
-
-    BenchResult result = run_bench(searcher, depth, true);
+    BenchResult result = run_bench(searcher, true);
     const uint64_t eval_ns = time_evaluation_ns();
 
     std::ostringstream out;
-    out << "\nDepth: " << depth
-        << "\nNodes searched: " << result.nodes
+    out << "\nNodes searched: " << result.nodes
         << "\nTime: " << result.time_ms << " ms"
         << "\nNodes per second: " << (result.time_ms ? result.nodes * 1000 / result.time_ms : 0)
         << "\nEvaluation time: " << eval_ns << " ns (median of " << EVAL_TIMING_RUNS << ")" << std::endl;

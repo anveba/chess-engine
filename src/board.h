@@ -83,7 +83,8 @@ class Board
     bool is_draw_by_repetition() const;
     uint32_t repetitions() const;
 
-    inline bool is_loud(Move move) const;
+    inline bool is_capture(Move move) const { return move.is_ep() || (is_piece(at(move.to_sq())) && !move.is_castle()); }
+    inline bool is_loud(Move move) const { return move.is_promotion() || is_capture(move); }
     constexpr bool previous_was_null_move() const { return head->move.is_null(); }
     bool is_valid() const;
 
@@ -123,11 +124,6 @@ class Board
 
     BoardMemory root, *head;
 };
-
-inline bool Board::is_loud(Move move) const
-{
-    return move.is_promotion() || move.is_ep() || (is_piece(at(move.to_sq())) && !move.is_castle());
-}
 
 template<Colour Side>
 constexpr Bitboard Board::threats_to(Square sq, Bitboard occup) const

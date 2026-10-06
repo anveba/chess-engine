@@ -7,8 +7,10 @@
 
 using MoveEval = int32_t;
 
-TUNABLE(MAX_HISTORY, 15717, 4096, 32768);
-TUNABLE(MAX_HISTORY_BONUS, 1431, 100, 4000);
+TUNABLE(MAX_HISTORY, 16018, 4096, 32768);
+TUNABLE(MAX_HISTORY_BONUS, 1400, 100, 4000);
+
+MoveEval ordering_value(PieceType p);
 
 // Score from captures and promotions, minus a penalty for moving into a pawn attack.
 MoveEval estimate(const Board& board, Move move);

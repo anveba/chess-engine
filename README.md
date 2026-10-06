@@ -4,8 +4,9 @@ A UCI chess engine written in C++.
 Estimated strength: **2673 +/- 12 Elo** on the CCRL Blitz scale after 3200 games (see [Estimating Elo](#estimating-elo)).
 
 **Features**
-- Alpha-beta search with principal variation search and iterative deepening
-- Null-move pruning, late move reductions, and check extensions
+- Alpha-beta search with principal variation search
+- Iterative deepening with aspiration windows
+- Null-move pruning, late move reductions, reverse futility pruning, and check extensions
 - NNUE evaluation
 - Tuned search parameters
 - Transposition table

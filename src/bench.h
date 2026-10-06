@@ -5,7 +5,6 @@
 
 #include "search.h"
 
-constexpr int DEFAULT_BENCH_DEPTH = 6;
 constexpr int EVAL_TIMING_RUNS = 101;
 
 struct BenchResult
@@ -14,7 +13,7 @@ struct BenchResult
     uint64_t time_ms = 0;
 };
 
-BenchResult run_bench(SearchMaster& searcher, int depth, bool verbose);
+BenchResult run_bench(SearchMaster& searcher, bool verbose);
 uint64_t time_evaluation_ns();
 
 #endif
