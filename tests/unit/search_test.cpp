@@ -64,11 +64,9 @@ TEST(node_limited_search_is_deterministic)
 
 TEST(bench_is_deterministic)
 {
-    constexpr int DEPTH = 4;
-
     SearchMaster searcher(1, TEST_TABLE_SIZE_MB);
-    const uint64_t first = run_bench(searcher, DEPTH, false).nodes;
-    const uint64_t second = run_bench(searcher, DEPTH, false).nodes;
+    const uint64_t first = run_bench(searcher, false).nodes;
+    const uint64_t second = run_bench(searcher, false).nodes;
     CHECK(first > 0);
     CHECK_EQ(first, second);
 }

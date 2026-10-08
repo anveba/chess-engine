@@ -93,7 +93,7 @@ bool TimeManager::should_stop_at_iteration(const IterationInfo& iteration, Us el
     if (iteration.root_moves == 1 || stable_mate_iterations >= STABLE_MATE_ITERATIONS)
         return true;
 
-    // Adjust target time
+    // Adjust target time based on stability
     double additional_time_factor = stability_scale(stable_iterations);
     if (score_dropped)
         additional_time_factor *= EVAL_DROP_SCALE_PERCENT / 100.0;
