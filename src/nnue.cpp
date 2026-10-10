@@ -7,7 +7,7 @@
 #include <immintrin.h>
 #include <iostream>
 
-#define EMBEDDED_NET "nnue/gen2.nnue"
+#define EMBEDDED_NET "nnue/gen3-512-8.nnue"
 
 asm(".section .rodata\n"
     ".balign 64\n"
@@ -63,10 +63,13 @@ void NNUEAccumulatorPair::update_feature(const NNUE& nnue, Square sq, Piece piec
 }
 
 // https://chessprogramming.org/NNUE, https://asteri.sm/files/2024-06-01-nnue
-int32_t NNUEAccumulatorPair::evaluate(const NNUE& nnue, Colour perspective) const
+int32_t NNUEAccumulatorPair::evaluate(const NNUE& nnue, const Board& board) const
 {
+    const Colour perspective = board.side();
     const int16_t* our_acc = perspective == WHITE ? acc : acc + NNUE_HIDDEN_SIZE;
     const int16_t* their_acc = perspective == WHITE ? acc + NNUE_HIDDEN_SIZE : acc;
+    constexpr int output_bucket_divisor = (32 + NNUE_OUTPUT_BUCKET_COUNT - 1) / NNUE_OUTPUT_BUCKET_COUNT;
+    const int output_bucket = (pop_count(board.occ()) - 2) / output_bucket_divisor;
 
 #ifdef __AVX2__
     // Lizard SIMD for SCReLU
@@ -77,8 +80,8 @@ int32_t NNUEAccumulatorPair::evaluate(const NNUE& nnue, Colour perspective) cons
     for (size_t i = 0; i < NNUE_HIDDEN_SIZE; i += 16) {
         const __m256i us = _mm256_load_si256((const __m256i*)(our_acc + i));
         const __m256i them = _mm256_load_si256((const __m256i*)(their_acc + i));
-        const __m256i us_weights = _mm256_load_si256((const __m256i*)(nnue.output_weights + i));
-        const __m256i them_weights = _mm256_load_si256((const __m256i*)(nnue.output_weights + i + NNUE_HIDDEN_SIZE));
+        const __m256i us_weights = _mm256_load_si256((const __m256i*)(nnue.output_weights[output_bucket] + i));
+        const __m256i them_weights = _mm256_load_si256((const __m256i*)(nnue.output_weights[output_bucket] + i + NNUE_HIDDEN_SIZE));
 
         const __m256i us_clamped = _mm256_min_epi16(_mm256_max_epi16(us, vec_zero), vec_qa);
         const __m256i them_clamped = _mm256_min_epi16(_mm256_max_epi16(them, vec_zero), vec_qa);
@@ -100,14 +103,14 @@ int32_t NNUEAccumulatorPair::evaluate(const NNUE& nnue, Colour perspective) cons
 #else
     int32_t eval_our = 0, eval_their = 0; // accumulators, ideally more
     for (size_t i = 0; i < NNUE_HIDDEN_SIZE; i++) {
-        eval_our += screlu(our_acc[i]) * nnue.output_weights[i];
-        eval_their += screlu(their_acc[i]) * nnue.output_weights[NNUE_HIDDEN_SIZE + i];
+        eval_our += screlu(our_acc[i]) * nnue.output_weights[output_bucket][i];
+        eval_their += screlu(their_acc[i]) * nnue.output_weights[output_bucket][NNUE_HIDDEN_SIZE + i];
     }
     int32_t eval = eval_our + eval_their;
 #endif
 
     eval /= NNUE_QA;
-    eval += nnue.output_bias;
+    eval += nnue.output_bias[output_bucket];
 
     eval *= NNUE_SCALE;
     eval /= NNUE_QA * NNUE_QB;
@@ -162,8 +165,8 @@ bool NNUE::load_from_bytes(const unsigned char* data, size_t size, NNUE& result)
 
     data = read_little_endian_int16s(data, &result.feature_weights[0][0], NNUE_FEATURE_COUNT * NNUE_HIDDEN_SIZE);
     data = read_little_endian_int16s(data, result.accumulator_bias, NNUE_HIDDEN_SIZE);
-    data = read_little_endian_int16s(data, result.output_weights, 2 * NNUE_HIDDEN_SIZE);
-    read_little_endian_int16s(data, &result.output_bias, 1);
+    data = read_little_endian_int16s(data, result.output_weights[0], NNUE_OUTPUT_BUCKET_COUNT * 2 * NNUE_HIDDEN_SIZE);
+    read_little_endian_int16s(data, result.output_bias, NNUE_OUTPUT_BUCKET_COUNT);
     return true;
 }
 

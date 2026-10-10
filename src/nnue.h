@@ -9,10 +9,11 @@
 class Board;
 
 constexpr size_t NNUE_FEATURE_COUNT = 2 * SQ_MAX * VALID_PIECE_TYPE_COUNT;
-constexpr size_t NNUE_HIDDEN_SIZE = 256;
+constexpr size_t NNUE_HIDDEN_SIZE = 512;
+constexpr size_t NNUE_OUTPUT_BUCKET_COUNT = 8;
 constexpr int32_t NNUE_QA = 255;
 constexpr int32_t NNUE_QB = 64;
-constexpr int32_t NNUE_SCALE = 400;
+constexpr int32_t NNUE_SCALE = 280;
 constexpr int NNUE_MAX_UPDATED_PIECE = 3;
 
 struct NNUEAccumulatorPair;
@@ -35,14 +36,14 @@ struct NNUE
 
     alignas(32) int16_t feature_weights[NNUE_FEATURE_COUNT][NNUE_HIDDEN_SIZE];
     alignas(32) int16_t accumulator_bias[NNUE_HIDDEN_SIZE];
-    alignas(32) int16_t output_weights[NNUE_HIDDEN_SIZE * 2];
-    alignas(32) int16_t output_bias;
+    alignas(32) int16_t output_weights[NNUE_OUTPUT_BUCKET_COUNT][NNUE_HIDDEN_SIZE * 2];
+    alignas(32) int16_t output_bias[NNUE_OUTPUT_BUCKET_COUNT];
 };
 
 struct NNUEAccumulatorPair
 {
   public:
-    int32_t evaluate(const NNUE& nnue, Colour perspective) const;
+    int32_t evaluate(const NNUE& nnue, const Board& board) const;
     void set(const NNUE& nnue, const Board& board);
     void update(const NNUE& nnue, const NNUEAccumulatorPair& parent, const UpdatedPiece (&updated)[NNUE_MAX_UPDATED_PIECE]);
 

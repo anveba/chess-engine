@@ -7,7 +7,7 @@ Estimated strength: **2673 +/- 12 Elo** on the CCRL Blitz scale after 3200 games
 - Alpha-beta search with principal variation search
 - Iterative deepening with aspiration windows
 - Null-move pruning, late move reductions, reverse futility pruning, and check extensions
-- NNUE evaluation
+- NNUE evaluation with 512 hidden nodes and 8 output buckets, optimised with SIMD
 - Tuned search parameters
 - Transposition table
 - Move ordering by the transposition table move, MVV-LVA for captures, killer moves, and the history heuristic

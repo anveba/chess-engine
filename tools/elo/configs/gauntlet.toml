@@ -1,5 +1,5 @@
 # Takes about 6-7 hours.
-# Opponents with known ratings from the CCRL Blitz list (Sep 26, 2026):
+# Opponents with known ratings from the CCRL Blitz list (Oct 10, 2026):
 # https://computerchess.org.uk/ccrl/404/rating_list_all.html
 
 [match]
@@ -18,63 +18,65 @@ name = "Chrunch"
 options = {}
 
 [[opponent]]
-name = "Berserk 2.0.0"
-cmd = "berserk/berserk-2.0.0"
-rating = 2528
+name = "Berserk 4.1.0"
+cmd = "berserk/berserk-4.1.0"
+rating = 3133
 rating_error = 17
 
 [[opponent]]
-name = "Tantabus 2.0.0"
-cmd = "tantabus/tantabus-2.0.0"
-rating = 2555
-rating_error = 13
+name = "Halogen 9"
+cmd = "halogen/halogen-9"
+rating = 3168
+rating_error = 16
 
 [[opponent]]
-name = "WyldChess 1.51"
-cmd = "wyldchess/wyldchess-1.51"
-rating = 2603
-rating_error = 12
-
-[[opponent]]
-name = "Weiss 0.9"
-cmd = "weiss/weiss-0.9"
-rating = 2650
-rating_error = 19
-
-[[opponent]]
-name = "Stash 21.0"
-cmd = "stash/stash-21.0"
-rating = 2713
+name = "Stash 31.0"
+cmd = "stash/stash-31.0"
+rating = 3208
 rating_error = 14
 options = { "Move Overhead" = 100 }
 
 [[opponent]]
-name = "Halogen 8"
-cmd = "halogen/halogen-8"
-rating = 2827
-rating_error = 17
+name = "Weiss 1.4"
+cmd = "weiss/weiss-1.4"
+rating = 3255
+rating_error = 16
 
 [[opponent]]
-name = "Weiss 0.10"
-cmd = "weiss/weiss-0.10"
-rating = 2847
-rating_error = 17
-
-[[opponent]]
-name = "Weiss 1.0"
-cmd = "weiss/weiss-1.0"
-rating = 2896
-rating_error = 18
-
-[[opponent]]
-name = "Berserk 3.2.0"
-cmd = "berserk/berserk-3.2.0"
-rating = 2910
-rating_error = 17
-
-[[opponent]]
-name = "Stash 25.0"
-cmd = "stash/stash-25.0"
-rating = 2933
-rating_error = 18
+name = "Stash 33.0"
+cmd = "stash/stash-33.0"
+rating = 3273
+rating_error = 14
 options = { "Move Overhead" = 100 }
+
+[[opponent]]
+name = "Weiss 2.0"
+cmd = "weiss/weiss-2.0"
+rating = 3319
+rating_error = 8
+
+[[opponent]]
+name = "Berserk 4.4.0"
+cmd = "berserk/berserk-4.4.0"
+rating = 3334
+rating_error = 14
+
+[[opponent]]
+name = "Stash 36.0"
+cmd = "stash/stash-36.0"
+rating = 3375
+rating_error = 14
+options = { "Move Overhead" = 100 }
+
+[[opponent]]
+name = "Stash 37.0"
+cmd = "stash/stash-37.0"
+rating = 3417
+rating_error = 11
+options = { "MoveOverhead" = 100 }
+
+[[opponent]]
+name = "Halogen 11"
+cmd = "halogen/halogen-11"
+rating = 3426
+rating_error = 9
