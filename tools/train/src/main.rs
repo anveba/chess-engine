@@ -20,7 +20,7 @@ use bullet_lib::{
 };
 use input::Chess768EngineOrder;
 
-const NET_NAME: str = "gen3-512";
+const NET_NAME: &str = "gen3-512";
 const HIDDEN_SIZE: usize = 512;
 const NUM_OUTPUT_BUCKETS: usize = 8;
 const SCALE: f32 = 280.0;
@@ -37,7 +37,7 @@ const THREADS: usize = 2;
 const LOADER_BUFFER_MB: usize = 1024;
 
 fn main() {
-    let args: Vec<String> = std::env::args();
+    let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         panic!("Usage: train DATA... OUTPUT_DIR");
     }
@@ -88,7 +88,7 @@ fn main() {
             final_superbatch: SUPERBATCHES,
         },
         save_rate: 10,
-    }
+    };
 
     let settings = LocalSettings {
         threads: THREADS,
@@ -97,10 +97,10 @@ fn main() {
         batch_queue_size: 32,
     };
     let data_loader = ViriBinpackLoader::new_interleave_multiple(
-        &data_paths.iter().map(String::as_str).collect(),
+        &data_paths.iter().map(String::as_str).collect::<Vec<_>>(),
         LOADER_BUFFER_MB,
         THREADS,
         ViriFilter::Builtin(Filter::default()),
-    )
-    trainer.run(&schedule(), &settings, &data_loader);
+    );
+    trainer.run(&schedule, &settings, &data_loader);
 }
