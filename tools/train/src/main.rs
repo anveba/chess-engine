@@ -1,7 +1,7 @@
 // Base: https://github.com/jw1912/bullet/blob/main/examples/progression/2_output_buckets.rs
 //
 // Usage: train DATA... OUTPUT_DIR
-// Several viriformat files are interleaved, so every batch mixes positions from all of them.
+// DATA is the bulletformat file made by src/prepare.rs.
 
 mod input;
 
@@ -13,10 +13,7 @@ use bullet_lib::{
         schedule::{lr, wdl, TrainingSchedule, TrainingSteps},
         settings::LocalSettings,
     },
-    value::{
-        loader::viribinpack::{Filter, ViriBinpackLoader, ViriFilter},
-        ValueTrainerBuilder,
-    },
+    value::{loader::DirectSequentialDataLoader, ValueTrainerBuilder},
 };
 use input::Chess768EngineOrder;
 
@@ -34,7 +31,6 @@ const INITIAL_LR: f32 = 0.001;
 const LR_DECAY: f32 = 0.3 * 0.3 * 0.3 * 0.3 * 0.3;
 
 const THREADS: usize = 2;
-const LOADER_BUFFER_MB: usize = 1024;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -96,11 +92,6 @@ fn main() {
         output_directory: output_dir,
         batch_queue_size: 32,
     };
-    let data_loader = ViriBinpackLoader::new_interleave_multiple(
-        &data_paths.iter().map(String::as_str).collect::<Vec<_>>(),
-        LOADER_BUFFER_MB,
-        THREADS,
-        ViriFilter::Builtin(Filter::default()),
-    );
+    let data_loader = DirectSequentialDataLoader::new(&data_paths.iter().map(String::as_str).collect::<Vec<_>>());
     trainer.run(&schedule, &settings, &data_loader);
 }
