@@ -1,6 +1,6 @@
 CC := g++
-FLAGS := -DNO_MAIN -Wall -std=c++17 -march=native -pthread
-RELEASE_FLAGS := -O3 -flto
+FLAGS := -DNO_MAIN -Wall -std=c++17 -march=native
+RELEASE_FLAGS := -O3 -flto -DNDEBUG
 INCLUDE := -Isrc
 
 ROOT := ../..
