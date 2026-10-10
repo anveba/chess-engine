@@ -1,6 +1,6 @@
 // Base: https://github.com/jw1912/bullet/blob/main/examples/progression/2_output_buckets.rs
 //
-// Usage: train DATA... OUTPUT_DIR
+// Usage: train [--finetune CHECKPOINT] DATA... OUTPUT_DIR
 // DATA is the bulletformat file made by src/prepare.rs.
 
 mod input;
@@ -20,7 +20,7 @@ use input::Chess768EngineOrder;
 const NET_NAME: &str = "gen3-512";
 const HIDDEN_SIZE: usize = 512;
 const NUM_OUTPUT_BUCKETS: usize = 8;
-const SCALE: f32 = 280.0;
+const SCALE: f32 = 400.0;
 const QA: i16 = 255;
 const QB: i16 = 64;
 
@@ -29,16 +29,23 @@ const WDL_END: f32 = 0.5;
 const SUPERBATCHES: usize = 80;
 const INITIAL_LR: f32 = 0.001;
 const LR_DECAY: f32 = 0.3 * 0.3 * 0.3 * 0.3 * 0.3;
+const BATCHES_PER_SUPERBATCH: usize = 6104;
+const FINETUNE_SUPERBATCHES: usize = 8;
+const FINETUNE_BATCHES_PER_SUPERBATCH: usize = BATCHES_PER_SUPERBATCH / 4;
 
 const THREADS: usize = 2;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 3 {
-        panic!("Usage: train DATA... OUTPUT_DIR");
+    let (checkpoint, rest) = match args.get(1).map(String::as_str) {
+        Some("--finetune") => (args.get(2), &args[3.min(args.len())..]),
+        _ => (None, &args[1..]),
+    };
+    if rest.len() < 2 {
+        panic!("Usage: train [--finetune CHECKPOINT] DATA... OUTPUT_DIR");
     }
-    let output_dir = &args[args.len() - 1];
-    let data_paths = &args[1..args.len() - 1];
+    let output_dir = &rest[rest.len() - 1];
+    let data_paths = &rest[..rest.len() - 1];
 
     let mut trainer = ValueTrainerBuilder::default()
         .dual_perspective()
@@ -65,25 +72,11 @@ fn main() {
             l1.forward(hidden_layer).select(output_buckets)
         });
 
-    let schedule = TrainingSchedule {
-        net_id: NET_NAME.to_string(),
-        eval_scale: SCALE,
-        steps: TrainingSteps {
-            batch_size: 16_384,
-            batches_per_superbatch: 6104,
-            start_superbatch: 1,
-            end_superbatch: SUPERBATCHES,
-        },
-        wdl_scheduler: wdl::LinearWDL {
-            start: WDL_START,
-            end: WDL_END,
-        },
-        lr_scheduler: lr::CosineDecayLR {
-            initial_lr: INITIAL_LR,
-            final_lr: INITIAL_LR * LR_DECAY,
-            final_superbatch: SUPERBATCHES,
-        },
-        save_rate: 10,
+    let steps = |superbatches, batches_per_superbatch| TrainingSteps {
+        batch_size: 16_384,
+        batches_per_superbatch,
+        start_superbatch: 1,
+        end_superbatch: superbatches,
     };
 
     let settings = LocalSettings {
@@ -92,6 +85,40 @@ fn main() {
         output_directory: output_dir,
         batch_queue_size: 32,
     };
-    let data_loader = DirectSequentialDataLoader::new(&data_paths.iter().map(String::as_str).collect::<Vec<_>>());
-    trainer.run(&schedule, &settings, &data_loader);
+    let data_loader =
+        DirectSequentialDataLoader::new(&data_paths.iter().map(String::as_str).collect::<Vec<_>>());
+    match checkpoint {
+        None => {
+            let schedule = TrainingSchedule {
+                net_id: NET_NAME.to_string(),
+                eval_scale: SCALE,
+                steps: steps(SUPERBATCHES, BATCHES_PER_SUPERBATCH),
+                wdl_scheduler: wdl::LinearWDL {
+                    start: WDL_START,
+                    end: WDL_END,
+                },
+                lr_scheduler: lr::CosineDecayLR {
+                    initial_lr: INITIAL_LR,
+                    final_lr: INITIAL_LR * LR_DECAY,
+                    final_superbatch: SUPERBATCHES,
+                },
+                save_rate: 10,
+            };
+            trainer.run(&schedule, &settings, &data_loader);
+        }
+        Some(checkpoint) => {
+            trainer.load_from_checkpoint(checkpoint);
+            let schedule = TrainingSchedule {
+                net_id: format!("{NET_NAME}-finetune"),
+                eval_scale: SCALE,
+                steps: steps(FINETUNE_SUPERBATCHES, FINETUNE_BATCHES_PER_SUPERBATCH),
+                wdl_scheduler: wdl::ConstantWDL { value: WDL_END },
+                lr_scheduler: lr::ConstantLR {
+                    value: INITIAL_LR * LR_DECAY,
+                },
+                save_rate: 1,
+            };
+            trainer.run(&schedule, &settings, &data_loader);
+        }
+    }
 }

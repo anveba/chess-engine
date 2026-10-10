@@ -17,6 +17,7 @@ Estimated strength: **2673 +/- 12 Elo** on the CCRL Blitz scale after 3200 games
 - Time management that adapts based on intermediate search results
 
 **To-do**
+- NNUE training with more and better data on bigger networks
 - Reverse futility pruning, futility pruning and late move pruning
 - Multithreading
 - ...

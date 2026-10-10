@@ -480,6 +480,7 @@ name = "train"
 version = "0.1.0"
 dependencies = [
  "bullet_lib",
+ "rand 0.9.5",
 ]
 
 [[package]]
