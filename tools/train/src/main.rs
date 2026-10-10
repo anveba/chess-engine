@@ -20,16 +20,16 @@ use bullet_lib::{
 };
 use input::Chess768EngineOrder;
 
-const NET_NAME: str = "net";
+const NET_NAME: str = "gen3-512";
 const HIDDEN_SIZE: usize = 512;
 const NUM_OUTPUT_BUCKETS: usize = 8;
-const SCALE: f32 = 261.0;
+const SCALE: f32 = 280.0;
 const QA: i16 = 255;
 const QB: i16 = 64;
 
 const WDL_START: f32 = 0.3;
 const WDL_END: f32 = 0.5;
-const SUPERBATCHES: usize = 40;
+const SUPERBATCHES: usize = 80;
 const INITIAL_LR: f32 = 0.001;
 const LR_DECAY: f32 = 0.3 * 0.3 * 0.3 * 0.3 * 0.3;
 

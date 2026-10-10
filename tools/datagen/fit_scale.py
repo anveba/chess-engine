@@ -4,22 +4,26 @@
 Usage: fit_scale.py FILE...
 """
 
+import os
 import sys
 
 import numpy as np
 
 SAMPLE = 2_000_000
 MATE_SCORE = 32767
+CHUNK = 1 << 24
 
 
-def scores_and_results(path):
-    words = np.fromfile(path, dtype=np.uint32)
-    ends = np.flatnonzero(words == 0) # zero word is the end marker
+def scores_and_results(path, keep_prob):
+    words = np.memmap(path, dtype=np.uint32, mode="r")
+    ends = np.concatenate([np.flatnonzero(words[i:i + CHUNK] == 0) + i  # zero word is the end marker
+                           for i in range(0, len(words), CHUNK)])
     scores, results = [], []
     start = 0
     while start < len(words):
         end = ends[np.searchsorted(ends, start + 8)]
         game_scores = (words[start + 8:end] >> 16).astype(np.uint16).view(np.int16)
+        game_scores = game_scores[np.random.random(len(game_scores)) < keep_prob]
         scores.append(game_scores)
         results.append(np.full(len(game_scores), ((words[start + 7] >> 16) & 0xFF) / 2))  # 0, 0.5 or 1 for white
         start = end + 1
@@ -31,14 +35,12 @@ def loss(scale, scores, results):
 
 
 def main():
-    pairs = [scores_and_results(path) for path in sys.argv[1:]]
+    keep_prob = min(1, SAMPLE / (sum(os.path.getsize(path) for path in sys.argv[1:]) // 4))
+    pairs = [scores_and_results(path, keep_prob) for path in sys.argv[1:]]
     scores = np.concatenate([s for s, _ in pairs]).astype(float)
     results = np.concatenate([r for _, r in pairs])
     keep = np.abs(scores) < MATE_SCORE
     scores, results = scores[keep], results[keep]
-
-    sample = np.random.choice(len(scores), min(SAMPLE, len(scores)), replace=False)
-    scores, results = scores[sample], results[sample]
 
     # search through possible scale values directly, no smart stuff
     coarse = min(range(50, 2001, 10), key=lambda s: loss(s, scores, results))
