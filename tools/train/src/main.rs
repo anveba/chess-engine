@@ -17,8 +17,8 @@ use bullet_lib::{
 };
 use input::Chess768EngineOrder;
 
-const NET_NAME: &str = "gen3-512";
-const HIDDEN_SIZE: usize = 512;
+const NET_NAME: &str = "gen4-1024";
+const HIDDEN_SIZE: usize = 1024;
 const NUM_OUTPUT_BUCKETS: usize = 8;
 const SCALE: f32 = 400.0;
 const QA: i16 = 255;
