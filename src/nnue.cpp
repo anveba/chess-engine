@@ -7,7 +7,7 @@
 #include <immintrin.h>
 #include <iostream>
 
-#define EMBEDDED_NET "nnue/gen3-512-8.nnue"
+#define EMBEDDED_NET "nnue/gen4-512-8.nnue"
 
 asm(".section .rodata\n"
     ".balign 64\n"

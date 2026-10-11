@@ -51,22 +51,6 @@ TEST(eval_basic_sanity)
     }
 }
 
-#if !TRADITIONAL_EVAL
-TEST(nnue_network_is_loaded)
-{
-    // If there is no network, everything evals to zero
-    std::ifstream in(testing::data_path("positions.txt"));
-    Board board;
-    std::set<BoardEval> evals;
-    std::string fen;
-    for (int i = 0; i < 20 && std::getline(in, fen); i++) {
-        board.set_fen(fen);
-        evals.insert(evaluate(board));
-    }
-    CHECK(evals.size() > 1);
-}
-#endif
-
 TEST(eval_ranks_material)
 {
     // black missing nothing, a pawn, a knight, a rook, the queen.

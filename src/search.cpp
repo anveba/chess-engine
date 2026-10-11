@@ -325,7 +325,7 @@ BoardEval SearchWorker::quiescence(Board& board, StackFrame& f, BoardEval alpha,
         return 0;
 
     // Using the TT in quiescence seems to not be beneficial, perhaps because the current evaluation
-    // function is fast.
+    // function is fast. Update: Tested again with NNUE, still no improvement.
 
     BoardEval static_eval = -INF_EVAL;
     if (!in_check) {

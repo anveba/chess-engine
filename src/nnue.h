@@ -13,7 +13,7 @@ constexpr size_t NNUE_HIDDEN_SIZE = 512;
 constexpr size_t NNUE_OUTPUT_BUCKET_COUNT = 8;
 constexpr int32_t NNUE_QA = 255;
 constexpr int32_t NNUE_QB = 64;
-constexpr int32_t NNUE_SCALE = 280;
+constexpr int32_t NNUE_SCALE = 250;
 constexpr int NNUE_MAX_UPDATED_PIECE = 3;
 
 struct NNUEAccumulatorPair;
