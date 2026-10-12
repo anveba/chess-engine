@@ -1,13 +1,13 @@
 # Chrunch
 A UCI chess engine written in C++.
 
-Estimated strength: **2673 +/- 12 Elo** on the CCRL Blitz scale after 3200 games (see [Estimating Elo](#estimating-elo)).
+Estimated strength: **3322 +/- 10 Elo** on the CCRL Blitz scale after 3200 games (see [Estimating Elo](#estimating-elo)).
 
 **Features**
 - Alpha-beta search with principal variation search
 - Iterative deepening with aspiration windows
 - Null-move pruning, late move reductions, reverse futility pruning, and check extensions
-- NNUE evaluation with 512 hidden nodes and 8 output buckets, optimised with SIMD
+- NNUE evaluation trained via self-play with 512 hidden nodes and 8 output buckets, optimised with SIMD
 - Tuned search parameters
 - Transposition table
 - Move ordering by the transposition table move, MVV-LVA for captures, killer moves, and the history heuristic
@@ -54,7 +54,9 @@ By default it tests whether the change gains at least 5 normalized Elo.
 In the tools directory, the source code of programs used for testing can be found. This includes programs that:
  - estimate Elo,
  - tune the engine's parameters (SPSA),
- - run a sequential probability ratio test (SPRT).
+ - run a sequential probability ratio test (SPRT),
+ - generate data for NNUE training,
+ - train a neural network (NNUE) using [Bullet](https://github.com/jw1912/bullet),
  - pit two UCI-compliant programs against each other to determine which is stronger (`vs`), and
  - collect FEN strings of positions where both sides are roughly equal.
 
@@ -65,3 +67,9 @@ Furthermore, the engine can run tests of specific positions with a known best mo
 
     python3 tools/elo/gauntlet.py run CONFIG ENGINE --engines-dir DIR --output-dir DIR [--history FILE] [--fastchess PATH] [--ordo PATH]
     python3 tools/elo/gauntlet.py rate CONFIG [--ordo PATH] games.pgn ... # Estimate from existing games.
+
+## Generating training data
+`tools/datagen` generates data for NNUE training via self-play from randomised openings and writes the positions with their scores and the game results in viriformat. Build it with `make` and run with:
+
+    tools/datagen/bin/datagen OUTPUT THREADS TOTAL_GAMES [NODES_PER_MOVE] [SEED]
+    python3 tools/datagen/fit_scale.py FILE ... # Fit the scale to use in training and inference
